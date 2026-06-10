@@ -1,36 +1,35 @@
-# KioskFalke PWA V2
+# KioskFalke PWA V3
 
-Smartphone-optimierte private Kiosk-Verwaltung mit Kategorien, Produktverwaltung, User_ID-Login, Kontostand, Monatsjournal, Zahlungen, Fehlbuchungs-Korrektur und Admin-Analyse.
+Smartphone-optimierte Kiosk-Verwaltung mit modernem iOS/Apple-Design, Kategorien zuerst, Produkt-Icons, Kategorie-Icons, User_ID-Login, Kontostand, Monatsjournal, Konto-Korrekturen und Admin-Analyse.
 
-## Wichtigste Änderungen in V2
+## Neu in V3
 
-- Login mit **User_ID + Zugangscode** statt nur Zugangscode.
-- Admin kann Kategorien anlegen, bearbeiten und löschen.
-- Admin kann Produkte mit Titel, Beschreibung, Preis und Kategorie anlegen, bearbeiten und löschen/deaktivieren.
-- User und Admin haben ein Konto:
-  - Produktentnahmen belasten das Konto.
-  - Zahlungen erhöhen das Konto.
-  - Minus bedeutet offene Rechnung.
-  - 0 bedeutet ausgeglichen.
-  - Plus bedeutet Guthaben/Vorauszahlung.
-- Konto-Hinweis: Beträge sollen immer zum **1. eines Monats** bezahlt werden.
-- Monatsjournal zeigt den aktuellen Monat.
-- User können eigene Buchungen nicht löschen.
-- Admin kann im User-Profil Fehlbuchungen entfernen.
-- User können nur gelöscht werden, wenn ihr Konto exakt 0,00 € ist.
-- Admins können nur mit Sicherheitscode gelöscht werden.
-- Sicherheitscode zum Löschen eines Admins: `DROPADMIN`
-- Der letzte aktive Admin kann nicht gelöscht werden.
-- Admin-Analyse nach Produkten und Kategorien.
-- Warnung bei Produktbuchung, sobald das Konto bei **-50,00 € oder schlechter** steht.
-- Option „Eingeloggt bleiben“ beim Login.
+- Kiosk-Ansicht zeigt zuerst Kategorien. Nach Klick auf eine Kategorie werden die Produkte dieser Kategorie angezeigt.
+- Admin kann Kategorien mit Titel und Icon anlegen, bearbeiten und löschen/deaktivieren.
+- Admin kann Produkte mit Titel, Beschreibung, Preis, Kategorie, Icon und Umsatz-Option anlegen, bearbeiten und löschen/deaktivieren.
+- Produkt-Option: **Nicht dem Gesamtumsatz zurechnen**. Das Produkt belastet weiterhin das User-Konto, zählt aber nicht in Umsatz/Analyse.
+- Admin kann User-Konten manuell korrigieren: positive oder negative Beträge.
+- Neues iOS-artiges Design mit Glas-/Kartenoptik.
+- Das mitgelieferte KioskFalke-Logo ist als App-Symbol hinterlegt.
+
+## Icon-Upload Format
+
+Für Kategorien und Produkte können Icons hochgeladen werden.
+
+Empfohlen:
+
+- Format: `PNG`, `JPG`, `WebP` oder `SVG`
+- Seitenverhältnis: quadratisch, z. B. 512x512 px
+- Größe: maximal ca. 300 KB pro Icon
+
+Die Icons werden als Data-URL in Supabase gespeichert. Für private Nutzung ist das einfach und ohne extra Storage-Bucket nutzbar.
 
 ## Supabase Update
 
 In Supabase musst du einmalig die Datei ausführen:
 
 ```text
-supabase/setup_v2.sql
+supabase/setup_v3.sql
 ```
 
 Schritte:
@@ -38,12 +37,12 @@ Schritte:
 1. Supabase Projekt öffnen.
 2. Links **SQL Editor** öffnen.
 3. **New query** anklicken.
-4. Inhalt von `supabase/setup_v2.sql` komplett einfügen.
+4. Inhalt von `supabase/setup_v3.sql` komplett einfügen.
 5. **Run** klicken.
 
-Das Skript ist als Migration gedacht und kann auf deine bestehende Datenbank angewendet werden.
+Das Skript löscht zuerst alte RPC-Funktionen und erstellt sie neu. Tabellen und Daten bleiben erhalten.
 
-## Erster Login nach Update
+## Erster Login
 
 Falls du noch den Standard-Admin nutzt:
 
@@ -52,11 +51,19 @@ User_ID: admin
 Zugangscode: admin1234
 ```
 
-Danach bitte direkt einen eigenen Admin anlegen oder den bestehenden Admin bearbeiten.
+## Admin-Löschcode
+
+Admins können nur mit folgendem Sicherheitscode gelöscht/deaktiviert werden:
+
+```text
+DROPADMIN
+```
+
+Der letzte aktive Admin kann nicht gelöscht werden.
 
 ## Supabase URL / Key
 
-In `src/supabase.js` ist aktuell eine Fallback-Konfiguration enthalten.
+In `src/supabase.js` ist aktuell deine funktionierende Supabase-URL als Fallback enthalten.
 
 Wichtig: Die Supabase URL darf **nicht** so aussehen:
 
@@ -70,7 +77,7 @@ Sie muss so aussehen:
 https://...supabase.co
 ```
 
-Für spätere saubere Verwaltung kannst du in Vercel diese Environment Variables setzen:
+Optional kannst du später in Vercel diese Environment Variables setzen:
 
 ```text
 VITE_SUPABASE_URL
@@ -85,7 +92,3 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 4. Commit changes.
 5. Vercel deployed automatisch neu.
 6. Vor dem Testen `Ctrl + F5` drücken oder im Inkognito-Fenster öffnen.
-
-## Hinweis
-
-Diese App ist für private Kleingruppen gedacht. Zugangscodes sind wie Passwörter zu behandeln.
