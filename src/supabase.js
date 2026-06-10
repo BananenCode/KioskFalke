@@ -1,3 +1,4 @@
+console.log('SUPABASE BUILD TEST 999')
 import { createClient } from '@supabase/supabase-js'
 
 const url = 'https://kkvyfregqlyrjgrrpvtj.supabase.co'
