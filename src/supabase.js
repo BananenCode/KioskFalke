@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 
-const url = 'https://kkvyfreqglyrjgrrpvtj.supabase.co'
-const key = 'sb_publishable_hMaj4qBGG8ishEp33_sifw_rg4zaoe5'
-
-console.log('SUPABASE URL AKTUELL:', url)
+// Wichtig: Die URL darf NICHT mit /rest/v1/ enden.
+// Du kannst die Werte später wieder über Vercel Environment Variables setzen.
+const url = import.meta.env.VITE_SUPABASE_URL || 'https://kkvyfregqlyrjgrrpvtj.supabase.co'
+const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_cGn4hNURfnVzjzxffGrvIw_z09RPf9b'
 
 export const supabase = createClient(url, key)
