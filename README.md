@@ -92,3 +92,32 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 4. Commit changes.
 5. Vercel deployed automatisch neu.
 6. Vor dem Testen `Ctrl + F5` drücken oder im Inkognito-Fenster öffnen.
+
+
+## V4 Update
+
+- Kiosk-Ansicht zeigt zuerst große Kategorie-Kacheln.
+- Nach Klick auf eine Kategorie erscheinen Produkt-Kacheln im gleichen Stil.
+- Kategorie- und Produktbilder liegen als Hintergrund in der Kachel; Titel, Preis und Anzahl werden über einer halbtransparenten dunklen Ebene angezeigt.
+- Produktbeschreibungen werden im Kiosk ausgeblendet, bleiben aber in der Admin-Verwaltung erhalten.
+- Neuer Community-Tab für Produktvorschläge.
+- User und Admins können Vorschläge einreichen und mit Falken-Votes bewerten.
+- Admins können Community-Vorschläge als „Hinzugefügt“, „Abgelehnt“ oder wieder „Offen“ markieren.
+
+### Supabase Update V4
+
+Führe die Datei `supabase/setup_v3.sql` erneut komplett im Supabase SQL Editor aus. Das Skript ergänzt die Tabellen:
+
+- `kiosk_suggestions`
+- `kiosk_suggestion_votes`
+
+sowie die RPC-Funktionen:
+
+- `kiosk_community`
+- `kiosk_create_suggestion`
+- `kiosk_toggle_suggestion_vote`
+- `kiosk_admin_set_suggestion_status`
+
+### Icon-Upload
+
+Für Kategorie- und Produktbilder: PNG, JPG, WebP oder SVG. Empfohlen: quadratisch, mindestens 512×512 px, maximal ca. 300 KB.

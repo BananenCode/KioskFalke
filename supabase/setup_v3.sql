@@ -386,17 +386,77 @@ $$;
 
 create or replace function public.kiosk_admin_analysis(p_actor_id uuid, p_actor_code text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare result jsonb; month_start date := date_trunc('month',now())::date; next_month date := (date_trunc('month',now())+interval '1 month')::date;
+declare
+  result jsonb;
+  month_start date := date_trunc('month',now())::date;
+  next_month date := (date_trunc('month',now())+interval '1 month')::date;
 begin
   perform public._kiosk_require_admin(p_actor_id,p_actor_code);
+
   select jsonb_build_object(
-    'summary',jsonb_build_object(
-      'month_revenue',coalesce((select sum(e.total) from public.kiosk_entries e join public.kiosk_products p on p.id=e.product_id where e.deleted_at is null and coalesce(p.excluded_from_revenue,false)=false and e.created_at>=month_start and e.created_at<next_month),0),
-      'month_units',coalesce((select sum(e.quantity) from public.kiosk_entries e where e.deleted_at is null and e.created_at>=month_start and e.created_at<next_month),0),
-      'all_revenue',coalesce((select sum(e.total) from public.kiosk_entries e join public.kiosk_products p on p.id=e.product_id where e.deleted_at is null and coalesce(p.excluded_from_revenue,false)=false),0)
+    'summary', jsonb_build_object(
+      'month_revenue', coalesce((
+        select sum(e.total)
+        from public.kiosk_entries e
+        join public.kiosk_products p on p.id=e.product_id
+        where e.deleted_at is null
+          and coalesce(p.excluded_from_revenue,false)=false
+          and e.created_at>=month_start
+          and e.created_at<next_month
+      ),0),
+      'month_units', coalesce((
+        select sum(e.quantity)
+        from public.kiosk_entries e
+        where e.deleted_at is null
+          and e.created_at>=month_start
+          and e.created_at<next_month
+      ),0),
+      'all_revenue', coalesce((
+        select sum(e.total)
+        from public.kiosk_entries e
+        join public.kiosk_products p on p.id=e.product_id
+        where e.deleted_at is null
+          and coalesce(p.excluded_from_revenue,false)=false
+      ),0)
     ),
-    'products',coalesce((select jsonb_agg(x order by (x->>'month_revenue')::numeric desc) from (select jsonb_build_object('name',p.name,'category',coalesce(c.title,'Ohne Kategorie'),'excluded_from_revenue',p.excluded_from_revenue,'month_units',coalesce(sum(e.quantity) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null),0),'month_revenue',case when p.excluded_from_revenue then 0 else coalesce(sum(e.total) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null),0) end,'all_units',coalesce(sum(e.quantity) filter(where e.deleted_at is null),0),'all_revenue',case when p.excluded_from_revenue then 0 else coalesce(sum(e.total) filter(where e.deleted_at is null),0) end) from public.kiosk_products p left join public.kiosk_categories c on c.id=p.category_id left join public.kiosk_entries e on e.product_id=p.id group by p.id,p.name,c.title,p.excluded_from_revenue) x),'[]'::jsonb),
-    'categories',coalesce((select jsonb_agg(y order by (y->>'month_revenue')::numeric desc) from (select jsonb_build_object('title',coalesce(c.title,'Ohne Kategorie'),'month_units',coalesce(sum(e.quantity) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null),0),'month_revenue',coalesce(sum(e.total) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null and coalesce(p.excluded_from_revenue,false)=false),0),'all_revenue',coalesce(sum(e.total) filter(where e.deleted_at is null and coalesce(p.excluded_from_revenue,false)=false),0)) from public.kiosk_categories c left join public.kiosk_products p on p.category_id=c.id left join public.kiosk_entries e on e.product_id=p.id group by c.id,c.title) y),'[]'::jsonb)
+    'products', coalesce((
+      select jsonb_agg(x.obj order by x.month_revenue desc)
+      from (
+        select
+          coalesce(sum(e.quantity) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null),0) as month_units,
+          case when coalesce(p.excluded_from_revenue,false) then 0 else coalesce(sum(e.total) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null),0) end as month_revenue,
+          jsonb_build_object(
+            'name',p.name,
+            'category',coalesce(c.title,'Ohne Kategorie'),
+            'excluded_from_revenue',coalesce(p.excluded_from_revenue,false),
+            'month_units',coalesce(sum(e.quantity) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null),0),
+            'month_revenue',case when coalesce(p.excluded_from_revenue,false) then 0 else coalesce(sum(e.total) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null),0) end,
+            'all_units',coalesce(sum(e.quantity) filter(where e.deleted_at is null),0),
+            'all_revenue',case when coalesce(p.excluded_from_revenue,false) then 0 else coalesce(sum(e.total) filter(where e.deleted_at is null),0) end
+          ) as obj
+        from public.kiosk_products p
+        left join public.kiosk_categories c on c.id=p.category_id
+        left join public.kiosk_entries e on e.product_id=p.id
+        group by p.id,p.name,c.title,p.excluded_from_revenue
+      ) x
+    ),'[]'::jsonb),
+    'categories', coalesce((
+      select jsonb_agg(y.obj order by y.month_revenue desc)
+      from (
+        select
+          coalesce(sum(e.total) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null and coalesce(p.excluded_from_revenue,false)=false),0) as month_revenue,
+          jsonb_build_object(
+            'title',coalesce(c.title,'Ohne Kategorie'),
+            'month_units',coalesce(sum(e.quantity) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null),0),
+            'month_revenue',coalesce(sum(e.total) filter(where e.created_at>=month_start and e.created_at<next_month and e.deleted_at is null and coalesce(p.excluded_from_revenue,false)=false),0),
+            'all_revenue',coalesce(sum(e.total) filter(where e.deleted_at is null and coalesce(p.excluded_from_revenue,false)=false),0)
+          ) as obj
+        from public.kiosk_categories c
+        left join public.kiosk_products p on p.category_id=c.id
+        left join public.kiosk_entries e on e.product_id=p.id
+        group by c.id,c.title
+      ) y
+    ),'[]'::jsonb)
   ) into result;
   return result;
 end;
@@ -410,5 +470,99 @@ insert into public.kiosk_products(name,description,price,category_id,active)
 select v.name,v.description,v.price,(select id from public.kiosk_categories where title='Allgemein' limit 1),true
 from (values ('Cola','Softgetränk',1.20),('Wasser','Mineralwasser',0.80),('Schokoriegel','Snack',1.00)) v(name,description,price)
 where not exists (select 1 from public.kiosk_products);
+
+grant execute on all functions in schema public to anon, authenticated;
+
+-- V4 Community Vorschläge & Votes
+create table if not exists public.kiosk_suggestions (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  description text not null default '',
+  status text not null default 'open' check (status in ('open','added','rejected')),
+  created_by uuid not null references public.kiosk_users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.kiosk_suggestion_votes (
+  suggestion_id uuid not null references public.kiosk_suggestions(id) on delete cascade,
+  user_id uuid not null references public.kiosk_users(id),
+  created_at timestamptz not null default now(),
+  primary key (suggestion_id, user_id)
+);
+
+alter table public.kiosk_suggestions enable row level security;
+alter table public.kiosk_suggestion_votes enable row level security;
+drop policy if exists deny_suggestions on public.kiosk_suggestions;
+drop policy if exists deny_suggestion_votes on public.kiosk_suggestion_votes;
+create policy deny_suggestions on public.kiosk_suggestions for all using (false) with check (false);
+create policy deny_suggestion_votes on public.kiosk_suggestion_votes for all using (false) with check (false);
+
+drop function if exists public.kiosk_community(uuid,text) cascade;
+create or replace function public.kiosk_community(p_actor_id uuid, p_actor_code text)
+returns table(
+  id uuid,
+  title text,
+  description text,
+  status text,
+  created_by_name text,
+  created_at timestamptz,
+  upvotes bigint,
+  user_voted boolean
+)
+language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public._kiosk_actor(p_actor_id,p_actor_code)) then raise exception 'Ungültiger Zugang'; end if;
+  return query
+  select s.id, s.title, s.description, s.status, u.name as created_by_name, s.created_at,
+    count(v.user_id)::bigint as upvotes,
+    exists(select 1 from public.kiosk_suggestion_votes vv where vv.suggestion_id=s.id and vv.user_id=p_actor_id) as user_voted
+  from public.kiosk_suggestions s
+  join public.kiosk_users u on u.id=s.created_by
+  left join public.kiosk_suggestion_votes v on v.suggestion_id=s.id
+  group by s.id, s.title, s.description, s.status, u.name, s.created_at
+  order by case s.status when 'open' then 0 when 'added' then 1 else 2 end, count(v.user_id) desc, s.created_at desc;
+end;
+$$;
+
+drop function if exists public.kiosk_create_suggestion(uuid,text,text,text) cascade;
+create or replace function public.kiosk_create_suggestion(p_actor_id uuid, p_actor_code text, p_title text, p_description text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare out_id uuid;
+begin
+  if not exists (select 1 from public._kiosk_actor(p_actor_id,p_actor_code)) then raise exception 'Ungültiger Zugang'; end if;
+  if length(trim(p_title)) < 2 then raise exception 'Titel zu kurz'; end if;
+  insert into public.kiosk_suggestions(title, description, created_by)
+  values(trim(p_title), coalesce(trim(p_description),''), p_actor_id)
+  returning id into out_id;
+  return out_id;
+end;
+$$;
+
+drop function if exists public.kiosk_toggle_suggestion_vote(uuid,text,uuid) cascade;
+create or replace function public.kiosk_toggle_suggestion_vote(p_actor_id uuid, p_actor_code text, p_suggestion_id uuid)
+returns int language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not exists (select 1 from public._kiosk_actor(p_actor_id,p_actor_code)) then raise exception 'Ungültiger Zugang'; end if;
+  if exists (select 1 from public.kiosk_suggestion_votes where suggestion_id=p_suggestion_id and user_id=p_actor_id) then
+    delete from public.kiosk_suggestion_votes where suggestion_id=p_suggestion_id and user_id=p_actor_id;
+  else
+    insert into public.kiosk_suggestion_votes(suggestion_id,user_id) values(p_suggestion_id,p_actor_id);
+  end if;
+  select count(*)::int into n from public.kiosk_suggestion_votes where suggestion_id=p_suggestion_id;
+  return n;
+end;
+$$;
+
+drop function if exists public.kiosk_admin_set_suggestion_status(uuid,text,uuid,text) cascade;
+create or replace function public.kiosk_admin_set_suggestion_status(p_actor_id uuid, p_actor_code text, p_suggestion_id uuid, p_status text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform public._kiosk_require_admin(p_actor_id,p_actor_code);
+  if p_status not in ('open','added','rejected') then raise exception 'Status ungültig'; end if;
+  update public.kiosk_suggestions set status=p_status, updated_at=now() where id=p_suggestion_id;
+end;
+$$;
 
 grant execute on all functions in schema public to anon, authenticated;
