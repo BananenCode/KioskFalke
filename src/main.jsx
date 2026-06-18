@@ -1,14 +1,29 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ArrowLeft, BarChart3, Camera, CheckCircle2, CreditCard, Download, Edit3, FolderTree, Link2, LogOut, MessageSquarePlus, Package, Plus, Save, ShoppingBasket, Trash2, UserRoundCog, Users, WalletCards, X, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, BarChart3, Camera, CheckCircle2, CreditCard, Download, Edit3, FolderTree, Link2, LogOut, MessageSquarePlus, Package, Plus, Save, ShoppingBasket, Trash2, UserRoundCog, Users, WalletCards, X, SlidersHorizontal, Moon, Sun } from 'lucide-react'
 import { supabase } from './supabase'
 import './styles.css'
 
 const STORE_KEY = 'kioskfalke_session_v3'
+const THEME_KEY = 'kioskfalke_theme_v1'
 const money = (n) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(Number(n || 0))
 const dateTime = (d) => new Date(d).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
 const imgHint = 'Icon optional: PNG, JPG, WebP oder SVG. Am besten quadratisch, max. 300 KB.'
 const blank = { icon_data_url: '' }
+
+
+function useTheme() {
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem(THEME_KEY)
+    if (saved === 'dark' || saved === 'light') return saved
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  })
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem(THEME_KEY, theme)
+  }, [theme])
+  return [theme, () => setTheme(t => t === 'dark' ? 'light' : 'dark')]
+}
 
 function useSession() {
   const [session, setSession] = useState(() => { try { return JSON.parse(localStorage.getItem(STORE_KEY) || sessionStorage.getItem(STORE_KEY) || 'null') } catch { return null } })
@@ -34,31 +49,72 @@ function paypalMeLink(raw, amount) {
   const due = Math.max(0, -Number(amount || 0)).toFixed(2)
   return `https://paypal.me/${encodeURIComponent(clean)}${due > 0 ? '/' + due : ''}`
 }
-function pdfEscape(v){ return String(v ?? '').replace(/[\\()]/g, '\\$&').replace(/\r?\n/g, ' ') }
+function pdfEscape(v){
+  return String(v ?? '')
+    .replace(/[\()]/g, '\\$&')
+    .replace(/[ä]/g,'ae').replace(/[Ä]/g,'Ae')
+    .replace(/[ö]/g,'oe').replace(/[Ö]/g,'Oe')
+    .replace(/[ü]/g,'ue').replace(/[Ü]/g,'Ue')
+    .replace(/[ß]/g,'ss')
+    .replace(/\r?\n/g, ' ')
+}
+function monthKey(d){ return new Date(d).toLocaleString('de-DE', { month:'2-digit', year:'numeric' }) }
+function buildStatementLines(data) {
+  const u = data.user || {}
+  const lines = [
+    'KioskFalke Kontoauszug',
+    `${u.name || ''} (${u.user_key || ''})`,
+    `Erstellt am ${dateTime(new Date())}`,
+    `Aktueller Kontostand: ${money(u.balance)}`,
+    '',
+    'Produktbuchungen nach Monat.Jahr'
+  ]
+  const entries = [...(data.entries || [])].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))
+  if (!entries.length) lines.push('Keine Produktbuchungen vorhanden.')
+  let current = ''
+  entries.forEach(e => {
+    const key = monthKey(e.created_at)
+    if (key !== current) { current = key; lines.push('', key) }
+    lines.push(`${dateTime(e.created_at)} | ${e.product_name} | ${e.category_title || 'Ohne Kategorie'} | ${e.quantity}x | ${money(e.total)}${e.deleted_at ? ' | geloescht' : ''}`)
+  })
+  const other = [...(data.movements || [])].filter(m=>m.kind!=='entry').sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))
+  lines.push('', 'Zahlungen & Korrekturen nach Monat.Jahr')
+  if (!other.length) lines.push('Keine Zahlungen oder Korrekturen vorhanden.')
+  current = ''
+  other.forEach(m => {
+    const key = monthKey(m.created_at)
+    if (key !== current) { current = key; lines.push('', key) }
+    lines.push(`${dateTime(m.created_at)} | ${m.type_label} | ${m.note || ''} | ${money(m.amount)}`)
+  })
+  return lines
+}
 function downloadStatementPdf(data) {
   const u = data.user || {}
-  const lines = []
-  lines.push('KioskFalke Kontoauszug')
-  lines.push(`${u.name || ''} (${u.user_key || ''})`)
-  lines.push(`Erstellt am ${dateTime(new Date())}`)
-  lines.push(`Aktueller Kontostand: ${money(u.balance)}`)
-  lines.push('')
-  lines.push('Datum | Art | Beschreibung | Betrag')
-  ;(data.movements || []).forEach(m => lines.push(`${dateTime(m.created_at)} | ${m.type_label} | ${m.title}${m.note ? ' - ' + m.note : ''} | ${money(m.amount)}`))
-  const pageLines = lines.slice(0, 46)
-  let y = 800
-  const content = ['BT','/F1 18 Tf',`50 ${y} Td`,`(${pdfEscape(pageLines[0])}) Tj`,'/F1 10 Tf']
-  y -= 28
-  pageLines.slice(1).forEach(line => { content.push(`50 ${y} Td`, `(${pdfEscape(line).slice(0,112)}) Tj`); y -= 16 })
-  content.push('ET')
-  const stream = content.join('\n')
-  const objs = [
-    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
-    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
-    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
-    '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
-    `5 0 obj << /Length ${stream.length} >> stream\n${stream}\nendstream endobj`
-  ]
+  const lines = buildStatementLines(data)
+  const pages = []
+  const first = lines.slice(0, 42)
+  pages.push(first)
+  for (let i=42; i<lines.length; i+=48) pages.push(lines.slice(i, i+48))
+  const objs = ['1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj']
+  const pageObjNums = []
+  let nextObj = 3
+  const fontObj = nextObj++
+  const contentObjs = []
+  pages.forEach((pageLines, idx) => {
+    const pageObj = nextObj++, contentObj = nextObj++
+    pageObjNums.push(pageObj); contentObjs.push([contentObj, pageLines])
+    objs.push(`${pageObj} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontObj} 0 R >> >> /Contents ${contentObj} 0 R >> endobj`)
+  })
+  objs.splice(1, 0, `2 0 obj << /Type /Pages /Kids [${pageObjNums.map(n=>n+' 0 R').join(' ')}] /Count ${pageObjNums.length} >> endobj`)
+  objs.push(`${fontObj} 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj`)
+  contentObjs.forEach(([num, pageLines], pageIndex) => {
+    const content = ['BT','/F1 16 Tf',`1 0 0 1 50 800 Tm`,`(${pdfEscape(pageLines[0] || '')}) Tj`,'/F1 9 Tf']
+    let y = 772
+    pageLines.slice(1).forEach(line => { content.push(`1 0 0 1 50 ${y} Tm`, `(${pdfEscape(line).slice(0,122)}) Tj`); y -= 15 })
+    content.push('/F1 8 Tf', `1 0 0 1 50 28 Tm`, `(Seite ${pageIndex+1} von ${pages.length}) Tj`, 'ET')
+    const stream = content.join('\n')
+    objs.push(`${num} 0 obj << /Length ${stream.length} >> stream\n${stream}\nendstream endobj`)
+  })
   let body = '%PDF-1.4\n', offsets=[0]
   objs.forEach(o => { offsets.push(body.length); body += o + '\n' })
   const xref = body.length
@@ -77,15 +133,15 @@ function ImageInput({ value, onChange }) {
   return <div className="image-input"><div className="preview"><IconImg src={value} label="Icon" /></div><label className="upload"><Camera size={16}/> Icon hochladen<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={pick}/></label>{value && <button type="button" className="secondary smallbtn" onClick={()=>onChange('')}>Icon entfernen</button>}<small>{imgHint}</small></div>
 }
 
-function App() { const [session, setSession] = useSession(); const [tab, setTab] = useState('kiosk'); if (!session) return <Login onLogin={setSession} />; return <Shell session={session} setSession={setSession} tab={tab} setTab={setTab} /> }
-function Login({ onLogin }) {
+function App() { const [session, setSession] = useSession(); const [theme, toggleTheme] = useTheme(); const [tab, setTab] = useState('kiosk'); if (!session) return <Login onLogin={setSession} theme={theme} toggleTheme={toggleTheme} />; return <Shell session={session} setSession={setSession} tab={tab} setTab={setTab} theme={theme} toggleTheme={toggleTheme} /> }
+function Login({ onLogin, theme, toggleTheme }) {
   const [userKey, setUserKey] = useState(''), [code, setCode] = useState(''), [remember, setRemember] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState('')
   async function submit(e) { e.preventDefault(); setError(''); setBusy(true); try { const user = await rpc('kiosk_login', { p_user_key: userKey.trim(), p_code: code.trim() }); if (!user?.id) throw new Error('User_ID oder Zugangscode falsch'); onLogin({ ...user, code: code.trim() }, remember) } catch (e) { setError(e.message || 'Anmeldung fehlgeschlagen') } finally { setBusy(false) } }
-  return <main className="login-screen"><section className="login-card"><div className="brand-logo"><img src="/icons/icon-192.png" alt="KioskFalke" /></div><h1>KioskFalke</h1><p>Privater Kiosk. Mit User_ID und Code anmelden.</p><form onSubmit={submit} className="stack"><input autoFocus placeholder="User_ID" value={userKey} onChange={e=>setUserKey(e.target.value)} autoCapitalize="none"/><input placeholder="Zugangscode" type="password" value={code} onChange={e=>setCode(e.target.value)}/><label className="check"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/> Eingeloggt bleiben</label>{error && <div className="error">{error}</div>}<button disabled={!userKey.trim() || !code.trim() || busy}>{busy ? 'Prüfe…' : 'Einloggen'}</button></form><p className="small">Hinweis: Offene Beträge bitte immer zum 1. eines Monats bezahlen.</p></section></main>
+  return <main className="login-screen"><button className="ghost theme-toggle" type="button" onClick={toggleTheme} aria-label="Darkmode umschalten">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button><section className="login-card"><div className="brand-logo"><img src="/icons/icon-192.png" alt="KioskFalke" /></div><h1>KioskFalke</h1><p>Privater Kiosk. Mit User_ID und Code anmelden.</p><form onSubmit={submit} className="stack"><input autoFocus placeholder="User_ID" value={userKey} onChange={e=>setUserKey(e.target.value)} autoCapitalize="none"/><input placeholder="Zugangscode" type="password" value={code} onChange={e=>setCode(e.target.value)}/><label className="check"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/> Eingeloggt bleiben</label>{error && <div className="error">{error}</div>}<button disabled={!userKey.trim() || !code.trim() || busy}>{busy ? 'Prüfe…' : 'Einloggen'}</button></form><p className="small">Hinweis: Offene Beträge bitte immer zum 1. eines Monats bezahlen.</p></section></main>
 }
-function Shell({ session, setSession, tab, setTab }) {
+function Shell({ session, setSession, tab, setTab, theme, toggleTheme }) {
   const isAdmin = session.role === 'admin'; const tabs = [['kiosk', ShoppingBasket, 'Kiosk'], ['dashboard', WalletCards, 'Konto'], ['community', MessageSquarePlus, 'Community'], ...(isAdmin ? [['admin', UserRoundCog, 'Admin']] : [])]
-  return <div className="app"><header className="topbar"><div className="top-title"><img src="/icons/icon-192.png"/><div><strong>KioskFalke</strong><span>{session.name} · {session.user_key} · {isAdmin ? 'Admin' : 'User'}</span></div></div><button className="ghost" onClick={() => setSession(null)}><LogOut size={18}/></button></header><main className="content">{tab === 'kiosk' && <Kiosk session={session}/>} {tab === 'dashboard' && <Dashboard session={session}/>} {tab === 'community' && <Community session={session}/>} {tab === 'admin' && isAdmin && <Admin session={session}/>}</main><nav className="bottom-nav">{tabs.map(([key, Icon, label]) => <button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><Icon size={21}/><span>{label}</span></button>)}</nav></div>
+  return <div className="app"><header className="topbar"><div className="top-title"><img src="/icons/icon-192.png"/><div><strong>KioskFalke</strong><span>{session.name} · {session.user_key} · {isAdmin ? 'Admin' : 'User'}</span></div></div><div className="top-actions"><button className="ghost" onClick={toggleTheme} aria-label="Darkmode umschalten">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button><button className="ghost" onClick={() => setSession(null)}><LogOut size={18}/></button></div></header><main className="content">{tab === 'kiosk' && <Kiosk session={session}/>} {tab === 'dashboard' && <Dashboard session={session}/>} {tab === 'community' && <Community session={session}/>} {tab === 'admin' && isAdmin && <Admin session={session}/>}</main><nav className="bottom-nav">{tabs.map(([key, Icon, label]) => <button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><Icon size={21}/><span>{label}</span></button>)}</nav></div>
 }
 
 function TileImage({ src, label }) {
@@ -168,7 +224,7 @@ function UserProfile({ session, userId, onClose }) {
   async function delEntry(id){ const reason=prompt('Grund für Korrektur','Fehlbuchung'); if(reason!==null){ await rpc('kiosk_admin_delete_entry',{...actor(session),p_entry_id:id,p_reason:reason}); await load() } }
   if(!data) return <div className="modal"><div className="panel"><button className="ghost close" onClick={onClose}><X/></button><Empty text="Lade Profil…"/></div></div>
   const u=data.user
-  return <div className="modal"><div className="panel"><button className="ghost close" onClick={onClose}><X/></button><h2>{u.name}</h2><div className="card hero"><span>{u.user_key} · {u.role}</span><strong className={Number(u.balance)<0?'bad':Number(u.balance)>0?'good':''}>{money(u.balance)}</strong></div>{msg&&<div className="error">{msg}</div>}<form className="card form" onSubmit={addPayment}><h3>Zahlung verbuchen</h3><input type="number" step="0.01" placeholder="Betrag, z.B. 20" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><input placeholder="Notiz" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button><CreditCard size={18}/> Zahlung speichern</button></form><form className="card form" onSubmit={addAdjustment}><h3>Konto-Korrektur (+/-)</h3><input type="number" step="0.01" placeholder="z.B. -5 oder 5" value={adj.amount} onChange={e=>setAdj({...adj,amount:e.target.value})}/><input placeholder="Grund" value={adj.note} onChange={e=>setAdj({...adj,note:e.target.value})}/><button><CheckCircle2 size={18}/> Korrektur speichern</button></form><div className="actions"><button className="secondary" onClick={()=>downloadStatementPdf(data)}><Download size={18}/> Kontoauszug PDF</button></div><h3>Entnahmen</h3><div className="list">{data.entries.map(e=><article className="card row" key={e.id}><div><b>{e.product_name}</b><p>{e.category_title} · {money(e.total)} · {dateTime(e.created_at)} {e.deleted_at?'· gelöscht':''}</p></div>{!e.deleted_at&&<button className="danger" onClick={()=>delEntry(e.id)}>Fehlbuchung löschen</button>}</article>)}</div><h3>Zahlungen & Korrekturen</h3><div className="list">{(data.movements||[]).filter(m=>m.kind!=='entry').map(m=><article className="card row" key={m.kind+m.id}><div><b>{m.type_label}</b><p>{money(m.amount)} · {dateTime(m.created_at)} {m.note?'· '+m.note:''}</p></div></article>)}</div></div></div>
+  return <div className="modal"><div className="panel"><button className="ghost close" onClick={onClose}><X/></button><h2>{u.name}</h2><div className="card hero"><span>{u.user_key} · {u.role}</span><strong className={Number(u.balance)<0?'bad':Number(u.balance)>0?'good':''}>{money(u.balance)}</strong></div>{msg&&<div className="error">{msg}</div>}<form className="card form" onSubmit={addPayment}><h3>Zahlung verbuchen</h3><input type="number" step="0.01" placeholder="Betrag, z.B. 20" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><input placeholder="Notiz" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button><CreditCard size={18}/> Zahlung speichern</button></form><form className="card form" onSubmit={addAdjustment}><h3>Konto-Korrektur (+/-)</h3><input type="number" step="0.01" placeholder="z.B. -5 oder 5" value={adj.amount} onChange={e=>setAdj({...adj,amount:e.target.value})}/><input placeholder="Grund" value={adj.note} onChange={e=>setAdj({...adj,note:e.target.value})}/><button><CheckCircle2 size={18}/> Korrektur speichern</button></form><div className="actions"><button className="secondary" onClick={()=>downloadStatementPdf(data)}><Download size={18}/> Kontoauszug PDF</button></div><h3>Produktbuchungen nach Monat.Jahr</h3><div className="list grouped-list">{data.entries.map(e=><article className="card row" key={e.id}><div><b>{e.product_name}</b><p><span className="month-badge">{monthKey(e.created_at)}</span> {e.category_title} · {money(e.total)} · {dateTime(e.created_at)} {e.deleted_at?'· gelöscht':''}</p></div>{!e.deleted_at&&<button className="danger" onClick={()=>delEntry(e.id)}>Fehlbuchung löschen</button>}</article>)}</div><h3>Zahlungen & Korrekturen</h3><div className="list">{(data.movements||[]).filter(m=>m.kind!=='entry').map(m=><article className="card row" key={m.kind+m.id}><div><b>{m.type_label}</b><p>{money(m.amount)} · {dateTime(m.created_at)} {m.note?'· '+m.note:''}</p></div></article>)}</div></div></div>
 }
 function AdminAnalysis({ session }) { const [data,setData]=useState(null), [msg,setMsg]=useState(''); useEffect(()=>{rpc('kiosk_admin_analysis',actor(session)).then(setData).catch(e=>setMsg(e.message))},[]); if(msg) return <div className="error">{msg}</div>; if(!data) return <Empty text="Lade Analyse…"/>; const max=Math.max(1,...(data.products||[]).map(p=>Number(p.month_revenue||0))); return <div className="stack"><div className="stats"><Stat title="Umsatz Monat" value={money(data.summary.month_revenue)}/><Stat title="Einheiten Monat" value={data.summary.month_units}/><Stat title="Umsatz gesamt" value={money(data.summary.all_revenue)}/></div><h3>Produkte</h3>{data.products.map(p=><article className="card analysis" key={p.name}><b>{p.name}</b><p>{p.category} · Monat: {p.month_units} Stk. · {money(p.month_revenue)} {p.excluded_from_revenue?'· nicht im Umsatz':''}</p><div className="bar"><span style={{width:`${Math.max(3,Number(p.month_revenue||0)/max*100)}%`}}/></div></article>)}<h3>Kategorien</h3>{data.categories.map(c=><article className="card analysis" key={c.title}><b>{c.title}</b><p>Monat: {c.month_units} Stk. · {money(c.month_revenue)} · Gesamt: {money(c.all_revenue)}</p></article>)}</div> }
 
