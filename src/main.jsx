@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ArrowLeft, BarChart3, Camera, CheckCircle2, CreditCard, Edit3, FolderTree, LogOut, MessageSquarePlus, Package, Plus, ShoppingBasket, ThumbsUp, Trash2, UserRoundCog, Users, WalletCards, X, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, BarChart3, Camera, CheckCircle2, CreditCard, Download, Edit3, FolderTree, Link2, LogOut, MessageSquarePlus, Package, Plus, Save, ShoppingBasket, Trash2, UserRoundCog, Users, WalletCards, X, SlidersHorizontal } from 'lucide-react'
 import { supabase } from './supabase'
 import './styles.css'
 
@@ -25,6 +25,48 @@ function fileToDataUrl(file) { return new Promise((resolve, reject) => { const r
 function IconImg({ src, label, size='md' }) { return src ? <img className={`icon-img ${size}`} src={src} alt={label || 'Icon'} /> : <div className={`icon-placeholder ${size}`}>{(label || 'K').slice(0,1).toUpperCase()}</div> }
 function Empty({ text }) { return <div className="empty">{text}</div> }
 function Stat({title,value, tone=''}) { return <div className="stat"><span>{title}</span><b className={tone}>{value}</b></div> }
+
+function paypalMeLink(raw, amount) {
+  const v = String(raw || '').trim()
+  if (!v) return ''
+  const clean = v.replace(/^https?:\/\/(www\.)?paypal\.me\//i, '').replace(/^paypal\.me\//i, '').replace(/^@/, '').split(/[/?#]/)[0]
+  if (!clean) return ''
+  const due = Math.max(0, -Number(amount || 0)).toFixed(2)
+  return `https://paypal.me/${encodeURIComponent(clean)}${due > 0 ? '/' + due : ''}`
+}
+function pdfEscape(v){ return String(v ?? '').replace(/[\\()]/g, '\\$&').replace(/\r?\n/g, ' ') }
+function downloadStatementPdf(data) {
+  const u = data.user || {}
+  const lines = []
+  lines.push('KioskFalke Kontoauszug')
+  lines.push(`${u.name || ''} (${u.user_key || ''})`)
+  lines.push(`Erstellt am ${dateTime(new Date())}`)
+  lines.push(`Aktueller Kontostand: ${money(u.balance)}`)
+  lines.push('')
+  lines.push('Datum | Art | Beschreibung | Betrag')
+  ;(data.movements || []).forEach(m => lines.push(`${dateTime(m.created_at)} | ${m.type_label} | ${m.title}${m.note ? ' - ' + m.note : ''} | ${money(m.amount)}`))
+  const pageLines = lines.slice(0, 46)
+  let y = 800
+  const content = ['BT','/F1 18 Tf',`50 ${y} Td`,`(${pdfEscape(pageLines[0])}) Tj`,'/F1 10 Tf']
+  y -= 28
+  pageLines.slice(1).forEach(line => { content.push(`50 ${y} Td`, `(${pdfEscape(line).slice(0,112)}) Tj`); y -= 16 })
+  content.push('ET')
+  const stream = content.join('\n')
+  const objs = [
+    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
+    '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+    `5 0 obj << /Length ${stream.length} >> stream\n${stream}\nendstream endobj`
+  ]
+  let body = '%PDF-1.4\n', offsets=[0]
+  objs.forEach(o => { offsets.push(body.length); body += o + '\n' })
+  const xref = body.length
+  body += `xref\n0 ${objs.length+1}\n0000000000 65535 f \n` + offsets.slice(1).map(n=>String(n).padStart(10,'0')+' 00000 n ').join('\n') + `\ntrailer << /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
+  const blob = new Blob([body], {type:'application/pdf'})
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `Kontoauszug_${(u.user_key||'user').replace(/[^a-z0-9_-]/gi,'_')}.pdf`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000)
+}
+
 function ImageInput({ value, onChange }) {
   async function pick(e) {
     const f = e.target.files?.[0]; if (!f) return
@@ -78,11 +120,19 @@ function Dashboard({ session }) {
   const [data, setData] = useState(null), [error, setError] = useState('')
   useEffect(()=>{ rpc('kiosk_my_dashboard', actor(session)).then(setData).catch(e=>setError(e.message)) }, [])
   if (error) return <div className="error">{error}</div>; if (!data) return <Empty text="Lade Konto…" />
-  const bal = Number(data.balance || 0)
-  return <section><h2>Mein Konto</h2><div className="card hero"><span>Aktueller Kontostand</span><strong className={bal < 0 ? 'bad' : bal > 0 ? 'good' : ''}>{money(bal)}</strong><p>{data.pay_info}</p></div>{bal <= -50 && <div className="warning">Dein Konto ist über 50 € im Minus. Bitte zeitnah bezahlen.</div>}<div className="stats"><Stat title="Monat" value={data.month_label}/><Stat title="Entnahmen" value={money(data.month_spent)}/><Stat title="Zahlungen/Korrekturen" value={money(Number(data.month_payments||0)+Number(data.month_adjustments||0))}/></div><h3>Journal aktueller Monat</h3><div className="list">{(data.month_items || []).length ? data.month_items.map(r => <article className="card listitem" key={r.id}><div className="product-info"><IconImg src={r.icon_data_url} label={r.product_name} size="sm"/><div><b>{r.product_name}</b><span>{r.category_title || 'Ohne Kategorie'} · {r.quantity}× · {money(r.total)} · {dateTime(r.created_at)}</span></div></div></article>) : <Empty text="Keine Einträge im aktuellen Monat."/>}</div></section>
+  const bal = Number(data.balance || 0), payUrl = paypalMeLink(data.paypal_me, bal)
+  return <section><h2>Mein Konto</h2><div className="card hero"><span>Aktueller Kontostand</span><strong className={bal < 0 ? 'bad' : bal > 0 ? 'good' : ''}>{money(bal)}</strong><p>{data.pay_info}</p>{bal < 0 && payUrl && <a className="pay-link" href={payUrl} target="_blank" rel="noreferrer"><CreditCard size={19}/> Mit PayPal.Me bezahlen</a>}{bal < 0 && !payUrl && <small className="muted">PayPal.Me wurde vom Admin noch nicht hinterlegt.</small>}</div>{bal <= -50 && <div className="warning">Dein Konto ist über 50 € im Minus. Bitte zeitnah bezahlen.</div>}<div className="stats"><Stat title="Monat" value={data.month_label}/><Stat title="Entnahmen" value={money(data.month_spent)}/><Stat title="Zahlungen/Korrekturen" value={money(Number(data.month_payments||0)+Number(data.month_adjustments||0))}/></div><h3>Journal aktueller Monat</h3><div className="list">{(data.month_items || []).length ? data.month_items.map(r => <article className="card listitem" key={r.id}><div className="product-info"><IconImg src={r.icon_data_url} label={r.product_name} size="sm"/><div><b>{r.product_name}</b><span>{r.category_title || 'Ohne Kategorie'} · {r.quantity}× · {money(r.total)} · {dateTime(r.created_at)}</span></div></div></article>) : <Empty text="Keine Einträge im aktuellen Monat."/>}</div></section>
 }
 
-function Admin({ session }) { const [view, setView] = useState('overview'); const views = [['overview','Übersicht'],['categories','Kategorien'],['products','Produkte'],['users','User'],['analysis','Analyse']]; return <section><h2>Admin</h2><div className="segmented wrap">{views.map(([k,l]) => <button key={k} className={view===k?'active':''} onClick={()=>setView(k)}>{l}</button>)}</div>{view==='overview' && <AdminOverview session={session}/>} {view==='categories' && <AdminCategories session={session}/>} {view==='products' && <AdminProducts session={session}/>} {view==='users' && <AdminUsers session={session}/>} {view==='analysis' && <AdminAnalysis session={session}/>}</section> }
+function Admin({ session }) { const [view, setView] = useState('overview'); const views = [['overview','Übersicht'],['settings','Einstellungen'],['categories','Kategorien'],['products','Produkte'],['users','User'],['analysis','Analyse']]; return <section><h2>Admin</h2><div className="segmented wrap">{views.map(([k,l]) => <button key={k} className={view===k?'active':''} onClick={()=>setView(k)}>{l}</button>)}</div>{view==='overview' && <AdminOverview session={session}/>} {view==='settings' && <AdminSettings session={session}/>} {view==='categories' && <AdminCategories session={session}/>} {view==='products' && <AdminProducts session={session}/>} {view==='users' && <AdminUsers session={session}/>} {view==='analysis' && <AdminAnalysis session={session}/>}</section> }
+
+function AdminSettings({ session }) {
+  const [paypal,setPaypal]=useState(''), [msg,setMsg]=useState('')
+  useEffect(()=>{ rpc('kiosk_admin_get_settings', actor(session)).then(d=>setPaypal(d.paypal_me || '')).catch(e=>setMsg(e.message)) }, [])
+  async function save(e){ e.preventDefault(); setMsg(''); try{ await rpc('kiosk_admin_set_paypal_me',{...actor(session),p_paypal_me:paypal}); setMsg('PayPal.Me-Adresse gespeichert.') }catch(e){ setMsg(e.message) } }
+  return <div className="stack"><form className="card form" onSubmit={save}><h3>PayPal.Me für alle User</h3><p className="muted">Hinterlege nur deinen PayPal.Me-Namen oder die komplette paypal.me-Adresse. Im Konto-Tab wird automatisch der offene Betrag angehängt.</p><input placeholder="z.B. kioskfalke oder https://paypal.me/kioskfalke" value={paypal} onChange={e=>setPaypal(e.target.value)} autoCapitalize="none"/><button><Save size={18}/> Speichern</button>{msg&&<div className={msg.includes('gespeichert')?'notice':'error'}>{msg}</div>}</form></div>
+}
+
 function AdminOverview({ session }) { const [rows,setRows]=useState([]), [msg,setMsg]=useState(''); const load=async()=>setRows(await rpc('kiosk_admin_overview',actor(session))); useEffect(()=>{load().catch(e=>setMsg(e.message))},[]); return <div className="stack">{msg&&<div className="error">{msg}</div>}{rows.map(r=><article className="card row" key={r.user_id}><div><h3>{r.name}</h3><p>{r.user_key} · {r.role}</p><b className={Number(r.balance)<0?'bad':Number(r.balance)>0?'good':''}>{money(r.balance)}</b></div><p>Dieser Monat: {money(r.month_spent)} · {r.entries_count} Buchungen</p></article>)}</div> }
 
 function AdminCategories({ session }) {
@@ -118,7 +168,7 @@ function UserProfile({ session, userId, onClose }) {
   async function delEntry(id){ const reason=prompt('Grund für Korrektur','Fehlbuchung'); if(reason!==null){ await rpc('kiosk_admin_delete_entry',{...actor(session),p_entry_id:id,p_reason:reason}); await load() } }
   if(!data) return <div className="modal"><div className="panel"><button className="ghost close" onClick={onClose}><X/></button><Empty text="Lade Profil…"/></div></div>
   const u=data.user
-  return <div className="modal"><div className="panel"><button className="ghost close" onClick={onClose}><X/></button><h2>{u.name}</h2><div className="card hero"><span>{u.user_key} · {u.role}</span><strong className={Number(u.balance)<0?'bad':Number(u.balance)>0?'good':''}>{money(u.balance)}</strong></div>{msg&&<div className="error">{msg}</div>}<form className="card form" onSubmit={addPayment}><h3>Zahlung verbuchen</h3><input type="number" step="0.01" placeholder="Betrag, z.B. 20" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><input placeholder="Notiz" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button><CreditCard size={18}/> Zahlung speichern</button></form><form className="card form" onSubmit={addAdjustment}><h3>Konto-Korrektur (+/-)</h3><input type="number" step="0.01" placeholder="z.B. -5 oder 5" value={adj.amount} onChange={e=>setAdj({...adj,amount:e.target.value})}/><input placeholder="Grund" value={adj.note} onChange={e=>setAdj({...adj,note:e.target.value})}/><button><CheckCircle2 size={18}/> Korrektur speichern</button></form><h3>Entnahmen</h3><div className="list">{data.entries.map(e=><article className="card row" key={e.id}><div><b>{e.product_name}</b><p>{e.category_title} · {money(e.total)} · {dateTime(e.created_at)} {e.deleted_at?'· gelöscht':''}</p></div>{!e.deleted_at&&<button className="danger" onClick={()=>delEntry(e.id)}>Fehlbuchung löschen</button>}</article>)}</div></div></div>
+  return <div className="modal"><div className="panel"><button className="ghost close" onClick={onClose}><X/></button><h2>{u.name}</h2><div className="card hero"><span>{u.user_key} · {u.role}</span><strong className={Number(u.balance)<0?'bad':Number(u.balance)>0?'good':''}>{money(u.balance)}</strong></div>{msg&&<div className="error">{msg}</div>}<form className="card form" onSubmit={addPayment}><h3>Zahlung verbuchen</h3><input type="number" step="0.01" placeholder="Betrag, z.B. 20" value={pay.amount} onChange={e=>setPay({...pay,amount:e.target.value})}/><input placeholder="Notiz" value={pay.note} onChange={e=>setPay({...pay,note:e.target.value})}/><button><CreditCard size={18}/> Zahlung speichern</button></form><form className="card form" onSubmit={addAdjustment}><h3>Konto-Korrektur (+/-)</h3><input type="number" step="0.01" placeholder="z.B. -5 oder 5" value={adj.amount} onChange={e=>setAdj({...adj,amount:e.target.value})}/><input placeholder="Grund" value={adj.note} onChange={e=>setAdj({...adj,note:e.target.value})}/><button><CheckCircle2 size={18}/> Korrektur speichern</button></form><div className="actions"><button className="secondary" onClick={()=>downloadStatementPdf(data)}><Download size={18}/> Kontoauszug PDF</button></div><h3>Entnahmen</h3><div className="list">{data.entries.map(e=><article className="card row" key={e.id}><div><b>{e.product_name}</b><p>{e.category_title} · {money(e.total)} · {dateTime(e.created_at)} {e.deleted_at?'· gelöscht':''}</p></div>{!e.deleted_at&&<button className="danger" onClick={()=>delEntry(e.id)}>Fehlbuchung löschen</button>}</article>)}</div><h3>Zahlungen & Korrekturen</h3><div className="list">{(data.movements||[]).filter(m=>m.kind!=='entry').map(m=><article className="card row" key={m.kind+m.id}><div><b>{m.type_label}</b><p>{money(m.amount)} · {dateTime(m.created_at)} {m.note?'· '+m.note:''}</p></div></article>)}</div></div></div>
 }
 function AdminAnalysis({ session }) { const [data,setData]=useState(null), [msg,setMsg]=useState(''); useEffect(()=>{rpc('kiosk_admin_analysis',actor(session)).then(setData).catch(e=>setMsg(e.message))},[]); if(msg) return <div className="error">{msg}</div>; if(!data) return <Empty text="Lade Analyse…"/>; const max=Math.max(1,...(data.products||[]).map(p=>Number(p.month_revenue||0))); return <div className="stack"><div className="stats"><Stat title="Umsatz Monat" value={money(data.summary.month_revenue)}/><Stat title="Einheiten Monat" value={data.summary.month_units}/><Stat title="Umsatz gesamt" value={money(data.summary.all_revenue)}/></div><h3>Produkte</h3>{data.products.map(p=><article className="card analysis" key={p.name}><b>{p.name}</b><p>{p.category} · Monat: {p.month_units} Stk. · {money(p.month_revenue)} {p.excluded_from_revenue?'· nicht im Umsatz':''}</p><div className="bar"><span style={{width:`${Math.max(3,Number(p.month_revenue||0)/max*100)}%`}}/></div></article>)}<h3>Kategorien</h3>{data.categories.map(c=><article className="card analysis" key={c.title}><b>{c.title}</b><p>Monat: {c.month_units} Stk. · {money(c.month_revenue)} · Gesamt: {money(c.all_revenue)}</p></article>)}</div> }
 

@@ -121,3 +121,14 @@ sowie die RPC-Funktionen:
 ### Icon-Upload
 
 Für Kategorie- und Produktbilder: PNG, JPG, WebP oder SVG. Empfohlen: quadratisch, mindestens 512×512 px, maximal ca. 300 KB.
+
+## Update V5: PayPal.Me, Kontoauszug PDF, Liquid Glass
+
+Neu:
+- Admin kann unter **Admin > Einstellungen** eine globale PayPal.Me-Adresse hinterlegen.
+- Im Tab **Konto** erscheint bei negativem Kontostand ein PayPal.Me-Button mit automatisch angehängtem offenen Betrag.
+- Admins können im User-Profil einen **Kontoauszug als PDF** herunterladen.
+- Design wurde in Richtung iOS / iPhone Liquid Glass optimiert.
+
+### Supabase-Migration
+Bitte in Supabase den SQL Editor öffnen und `supabase/setup_v4_paypal_liquid.sql` einmal komplett ausführen. Dadurch wird die Tabelle `kiosk_settings` sowie neue/aktualisierte RPC-Funktionen für PayPal.Me und Kontoauszüge angelegt.
