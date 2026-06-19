@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ArrowLeft, BarChart3, Camera, CheckCircle2, CreditCard, Download, Edit3, FolderTree, Link2, LogOut, MessageSquarePlus, Package, Plus, Save, ShoppingBasket, Trash2, UserRoundCog, Users, WalletCards, X, SlidersHorizontal, Moon, Sun } from 'lucide-react'
+import { ArrowLeft, BarChart3, Camera, CheckCircle2, CreditCard, Download, Edit3, FolderTree, Heart, ImagePlus, Link2, LogOut, MessageCircle, MessageSquarePlus, Newspaper, Package, Pin, Plus, Save, Send, ShoppingBasket, Trash2, UserRoundCog, Users, WalletCards, X, SlidersHorizontal, Moon, Sun } from 'lucide-react'
 import { supabase } from './supabase'
 import './styles.css'
 
@@ -37,6 +37,34 @@ function useSession() {
 async function rpc(name, args = {}) { const { data, error } = await supabase.rpc(name, args); if (error) throw new Error(error.message); return data }
 function actor(session) { return { p_actor_id: session.id, p_actor_code: session.code } }
 function fileToDataUrl(file) { return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file) }) }
+async function newsImageToDataUrl(file) {
+  if (!['image/png','image/jpeg','image/webp'].includes(file.type)) throw new Error('Bitte PNG, JPG oder WebP verwenden.')
+  if (file.size > 5 * 1024 * 1024) throw new Error('Das Foto darf vor der Optimierung maximal 5 MB groß sein.')
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error('Das Foto konnte nicht verarbeitet werden.'))
+      img.src = objectUrl
+    })
+    const maxSide = 1600
+    const ratio = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio))
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio))
+    const context = canvas.getContext('2d')
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.84))
+    if (!blob) throw new Error('Das Foto konnte nicht optimiert werden.')
+    if (blob.size > 1.6 * 1024 * 1024) throw new Error('Das optimierte Foto ist noch zu groß. Bitte ein kleineres Bild verwenden.')
+    return await fileToDataUrl(blob)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
 function IconImg({ src, label, size='md' }) { return src ? <img className={`icon-img ${size}`} src={src} alt={label || 'Icon'} /> : <div className={`icon-placeholder ${size}`}>{(label || 'K').slice(0,1).toUpperCase()}</div> }
 function Empty({ text }) { return <div className="empty">{text}</div> }
 function Stat({title,value, tone=''}) { return <div className="stat"><span>{title}</span><b className={tone}>{value}</b></div> }
@@ -133,6 +161,24 @@ function ImageInput({ value, onChange }) {
   return <div className="image-input"><div className="preview"><IconImg src={value} label="Icon" /></div><label className="upload"><Camera size={16}/> Icon hochladen<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={pick}/></label>{value && <button type="button" className="secondary smallbtn" onClick={()=>onChange('')}>Icon entfernen</button>}<small>{imgHint}</small></div>
 }
 
+function NewsImageInput({ value, onChange }) {
+  const [busy, setBusy] = useState(false)
+  async function pick(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setBusy(true)
+    try {
+      onChange(await newsImageToDataUrl(file))
+    } catch (error) {
+      alert(error.message)
+    } finally {
+      setBusy(false)
+      e.target.value = ''
+    }
+  }
+  return <div className="news-image-input">{value && <img className="news-image-preview" src={value} alt="Vorschau des News-Fotos"/>}<div className="actions"><label className="upload news-upload"><ImagePlus size={17}/>{busy ? 'Foto wird optimiert…' : value ? 'Foto ersetzen' : 'Foto hinzufügen'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={pick} disabled={busy}/></label>{value && <button type="button" className="secondary smallbtn" onClick={()=>onChange('')}><X size={16}/> Entfernen</button>}</div><small className="muted">Optional · wird automatisch für die App optimiert.</small></div>
+}
+
 function App() { const [session, setSession] = useSession(); const [theme, toggleTheme] = useTheme(); const [tab, setTab] = useState('kiosk'); if (!session) return <Login onLogin={setSession} theme={theme} toggleTheme={toggleTheme} />; return <Shell session={session} setSession={setSession} tab={tab} setTab={setTab} theme={theme} toggleTheme={toggleTheme} /> }
 function Login({ onLogin, theme, toggleTheme }) {
   const [userKey, setUserKey] = useState(''), [code, setCode] = useState(''), [remember, setRemember] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState('')
@@ -140,8 +186,40 @@ function Login({ onLogin, theme, toggleTheme }) {
   return <main className="login-screen"><button className="ghost theme-toggle" type="button" onClick={toggleTheme} aria-label="Darkmode umschalten">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button><section className="login-card"><div className="brand-logo"><img src="/icons/icon-192.png" alt="KioskFalke" /></div><h1>KioskFalke</h1><p>Privater Kiosk. Mit User_ID und Code anmelden.</p><form onSubmit={submit} className="stack"><input autoFocus placeholder="User_ID" value={userKey} onChange={e=>setUserKey(e.target.value)} autoCapitalize="none"/><input placeholder="Zugangscode" type="password" value={code} onChange={e=>setCode(e.target.value)}/><label className="check"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/> Eingeloggt bleiben</label>{error && <div className="error">{error}</div>}<button disabled={!userKey.trim() || !code.trim() || busy}>{busy ? 'Prüfe…' : 'Einloggen'}</button></form><p className="small">Hinweis: Offene Beträge bitte immer zum 1. eines Monats bezahlen.</p></section></main>
 }
 function Shell({ session, setSession, tab, setTab, theme, toggleTheme }) {
-  const isAdmin = session.role === 'admin'; const tabs = [['kiosk', ShoppingBasket, 'Kiosk'], ['dashboard', WalletCards, 'Konto'], ['community', MessageSquarePlus, 'Community'], ...(isAdmin ? [['admin', UserRoundCog, 'Admin']] : [])]
-  return <div className="app"><header className="topbar"><div className="top-title"><img src="/icons/icon-192.png"/><div><strong>KioskFalke</strong><span>{session.name} · {session.user_key} · {isAdmin ? 'Admin' : 'User'}</span></div></div><div className="top-actions"><button className="ghost" onClick={toggleTheme} aria-label="Darkmode umschalten">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button><button className="ghost" onClick={() => setSession(null)}><LogOut size={18}/></button></div></header><main className="content">{tab === 'kiosk' && <Kiosk session={session}/>} {tab === 'dashboard' && <Dashboard session={session}/>} {tab === 'community' && <Community session={session}/>} {tab === 'admin' && isAdmin && <Admin session={session}/>}</main><nav className="bottom-nav">{tabs.map(([key, Icon, label]) => <button key={key} className={tab===key?'active':''} onClick={()=>setTab(key)}><Icon size={21}/><span>{label}</span></button>)}</nav></div>
+  const isAdmin = session.role === 'admin'
+  const [newsUnread, setNewsUnread] = useState(false)
+  const tabs = [['kiosk', ShoppingBasket, 'Kiosk'], ['dashboard', WalletCards, 'Konto'], ['community', MessageSquarePlus, 'Community'], ...(isAdmin ? [['admin', UserRoundCog, 'Admin']] : [])]
+
+  useEffect(() => {
+    let active = true
+    async function checkNews() {
+      try {
+        const unread = await rpc('kiosk_news_has_unread', actor(session))
+        if (!active) return
+        if (tab === 'community') {
+          setNewsUnread(false)
+          if (unread) await rpc('kiosk_news_mark_seen', actor(session))
+        } else {
+          setNewsUnread(Boolean(unread))
+        }
+      } catch {
+        if (active) setNewsUnread(false)
+      }
+    }
+    checkNews()
+    const timer = window.setInterval(checkNews, 60_000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [session.id, session.code, tab])
+
+  function openTab(key) {
+    setTab(key)
+    if (key === 'community') {
+      setNewsUnread(false)
+      rpc('kiosk_news_mark_seen', actor(session)).catch(() => {})
+    }
+  }
+
+  return <div className="app"><header className="topbar"><div className="top-title"><img src="/icons/icon-192.png" alt="KioskFalke"/><div><strong>KioskFalke</strong><span>{session.name} · {session.user_key} · {isAdmin ? 'Admin' : 'User'}</span></div></div><div className="top-actions"><button className="ghost icon-button" onClick={toggleTheme} aria-label="Darkmode umschalten">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button><button className="ghost icon-button" onClick={() => setSession(null)} aria-label="Abmelden"><LogOut size={18}/></button></div></header><main className="content">{tab === 'kiosk' && <Kiosk session={session}/>} {tab === 'dashboard' && <Dashboard session={session}/>} {tab === 'community' && <Community session={session} onSeen={()=>setNewsUnread(false)}/>} {tab === 'admin' && isAdmin && <Admin session={session}/>}</main><nav className="bottom-nav">{tabs.map(([key, Icon, label]) => <button key={key} className={tab===key?'active':''} onClick={()=>openTab(key)}><span className="nav-icon"><Icon size={21}/>{key === 'community' && newsUnread && <span className="news-pin" title="Neue News"><Pin size={13} fill="currentColor"/></span>}</span><span>{label}</span></button>)}</nav></div>
 }
 
 function TileImage({ src, label }) {
@@ -158,18 +236,81 @@ function Kiosk({ session }) {
 }
 
 
-function Community({ session }) {
-  const [items,setItems]=useState([]), [form,setForm]=useState({title:'',description:''}), [msg,setMsg]=useState(''), [busy,setBusy]=useState(false)
+function Community({ session, onSeen }) {
+  const [view, setView] = useState('news')
+  const [news, setNews] = useState([])
+  const [items, setItems] = useState([])
+  const [suggestionForm, setSuggestionForm] = useState({title:'',description:''})
+  const [newsForm, setNewsForm] = useState({title:'',body:'',image_data_url:''})
+  const [commentDrafts, setCommentDrafts] = useState({})
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
   const isAdmin = session.role === 'admin'
-  const load = async()=>setItems(await rpc('kiosk_community', actor(session)))
-  useEffect(()=>{load().catch(e=>setMsg(e.message))},[])
-  async function submit(e){ e.preventDefault(); setBusy(true); setMsg(''); try{ await rpc('kiosk_create_suggestion',{...actor(session),p_title:form.title,p_description:form.description}); setForm({title:'',description:''}); await load() }catch(e){setMsg(e.message)} finally{setBusy(false)} }
-  async function vote(id){ await rpc('kiosk_toggle_suggestion_vote',{...actor(session),p_suggestion_id:id}); await load() }
-  async function setStatus(id,status){ await rpc('kiosk_admin_set_suggestion_status',{...actor(session),p_suggestion_id:id,p_status:status}); await load() }
+
+  const loadNews = async () => {
+    const data = await rpc('kiosk_news_feed', actor(session))
+    setNews(Array.isArray(data) ? data : [])
+  }
+  const loadSuggestions = async () => setItems(await rpc('kiosk_community', actor(session)))
+
+  useEffect(() => {
+    Promise.all([loadNews(), loadSuggestions()]).catch(e=>setMsg(e.message))
+    rpc('kiosk_news_mark_seen', actor(session)).catch(()=>{})
+    onSeen?.()
+  }, [])
+
+  async function publishNews(e) {
+    e.preventDefault()
+    setBusy(true); setMsg('')
+    try {
+      await rpc('kiosk_admin_create_news', {...actor(session), p_title:newsForm.title, p_body:newsForm.body, p_image_data_url:newsForm.image_data_url})
+      setNewsForm({title:'',body:'',image_data_url:''})
+      await loadNews()
+      await rpc('kiosk_news_mark_seen', actor(session))
+      setMsg('News wurde veröffentlicht.')
+    } catch (error) { setMsg(error.message) } finally { setBusy(false) }
+  }
+
+  async function deleteNews(id) {
+    if (!confirm('Diesen News-Beitrag wirklich löschen?')) return
+    try { await rpc('kiosk_admin_delete_news', {...actor(session), p_news_id:id}); await loadNews() } catch (error) { setMsg(error.message) }
+  }
+
+  async function toggleLike(id) {
+    try { await rpc('kiosk_toggle_news_like', {...actor(session), p_news_id:id}); await loadNews() } catch (error) { setMsg(error.message) }
+  }
+
+  async function addComment(e, newsId) {
+    e.preventDefault()
+    const body = String(commentDrafts[newsId] || '').trim()
+    if (!body) return
+    try {
+      await rpc('kiosk_add_news_comment', {...actor(session), p_news_id:newsId, p_body:body})
+      setCommentDrafts(current => ({...current, [newsId]:''}))
+      await loadNews()
+    } catch (error) { setMsg(error.message) }
+  }
+
+  async function deleteComment(commentId) {
+    if (!confirm('Kommentar löschen?')) return
+    try { await rpc('kiosk_delete_news_comment', {...actor(session), p_comment_id:commentId}); await loadNews() } catch (error) { setMsg(error.message) }
+  }
+
+  async function submitSuggestion(e) {
+    e.preventDefault(); setBusy(true); setMsg('')
+    try {
+      await rpc('kiosk_create_suggestion',{...actor(session),p_title:suggestionForm.title,p_description:suggestionForm.description})
+      setSuggestionForm({title:'',description:''}); await loadSuggestions()
+    } catch (error) { setMsg(error.message) } finally { setBusy(false) }
+  }
+  async function vote(id) { try { await rpc('kiosk_toggle_suggestion_vote',{...actor(session),p_suggestion_id:id}); await loadSuggestions() } catch (error) { setMsg(error.message) } }
+  async function setStatus(id,status) { try { await rpc('kiosk_admin_set_suggestion_status',{...actor(session),p_suggestion_id:id,p_status:status}); await loadSuggestions() } catch (error) { setMsg(error.message) } }
+
   const open = items.filter(i=>i.status==='open')
   const decided = items.filter(i=>i.status!=='open')
-  const renderItem = i => <article className={`card suggestion ${i.status}`} key={i.id}><div><div className="suggestion-head"><b>{i.title}</b><span>{i.status==='added'?'Hinzugefügt':i.status==='rejected'?'Abgelehnt':'Offen'}</span></div>{i.description && <p>{i.description}</p>}<small>von {i.created_by_name || 'Unbekannt'} · {dateTime(i.created_at)}</small></div><div className="suggestion-actions"><button className={i.user_voted?'vote active':'vote'} onClick={()=>vote(i.id)} title="Falken-Vote"><span className="falcon">🦅</span> {i.upvotes}</button>{isAdmin && <><button className="secondary smallbtn" onClick={()=>setStatus(i.id,'added')}>Hinzugefügt</button><button className="danger smallbtn" onClick={()=>setStatus(i.id,'rejected')}>Ablehnen</button><button className="secondary smallbtn" onClick={()=>setStatus(i.id,'open')}>Offen</button></>}</div></article>
-  return <section><h2>Community</h2><form className="card form" onSubmit={submit}><h3>Produkt vorschlagen</h3><input placeholder="Produktname, z.B. Spezi Zero" value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/><input placeholder="Optional: Warum soll es rein?" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/><button disabled={!form.title.trim() || busy}><MessageSquarePlus size={18}/> Vorschlag senden</button></form>{msg && <div className="error">{msg}</div>}<h3 className="mt">Offene Vorschläge</h3><div className="stack">{open.length ? open.map(renderItem) : <Empty text="Noch keine offenen Vorschläge."/>}</div>{decided.length>0 && <><h3 className="mt">Bearbeitet</h3><div className="stack">{decided.map(renderItem)}</div></>}</section>
+  const renderSuggestion = i => <article className={`card suggestion ${i.status}`} key={i.id}><div><div className="suggestion-head"><b>{i.title}</b><span>{i.status==='added'?'Hinzugefügt':i.status==='rejected'?'Abgelehnt':'Offen'}</span></div>{i.description && <p>{i.description}</p>}<small>von {i.created_by_name || 'Unbekannt'} · {dateTime(i.created_at)}</small></div><div className="suggestion-actions"><button className={i.user_voted?'vote active':'vote'} onClick={()=>vote(i.id)} title="Falken-Vote"><span className="falcon">🦅</span> {i.upvotes}</button>{isAdmin && <><button className="secondary smallbtn" onClick={()=>setStatus(i.id,'added')}>Hinzugefügt</button><button className="danger smallbtn" onClick={()=>setStatus(i.id,'rejected')}>Ablehnen</button><button className="secondary smallbtn" onClick={()=>setStatus(i.id,'open')}>Offen</button></>}</div></article>
+
+  return <section className="community-page"><div className="section-heading"><div><span className="eyebrow">KioskFalke Social</span><h2>Community</h2></div></div><div className="segmented community-switch"><button className={view==='news'?'active':''} onClick={()=>setView('news')}><Newspaper size={18}/> News</button><button className={view==='suggestions'?'active':''} onClick={()=>setView('suggestions')}><MessageSquarePlus size={18}/> Produktvorschläge</button></div>{msg && <div className={msg.includes('veröffentlicht') ? 'notice' : 'error'}>{msg}</div>}{view === 'news' && <div className="news-layout">{isAdmin && <form className="card news-composer" onSubmit={publishNews}><div className="composer-heading"><div className="admin-avatar"><img src="/icons/icon-192.png" alt="KioskFalke"/></div><div><h3>News veröffentlichen</h3><p>Erstelle einen Beitrag für alle KioskFalke-User.</p></div></div><input maxLength={120} placeholder="Titel der News" value={newsForm.title} onChange={e=>setNewsForm({...newsForm,title:e.target.value})}/><textarea maxLength={3000} rows={5} placeholder="Was gibt es Neues?" value={newsForm.body} onChange={e=>setNewsForm({...newsForm,body:e.target.value})}/><NewsImageInput value={newsForm.image_data_url} onChange={value=>setNewsForm({...newsForm,image_data_url:value})}/><div className="composer-footer"><small>{newsForm.body.length}/3000 Zeichen</small><button disabled={busy || !newsForm.title.trim() || !newsForm.body.trim()}><Send size={18}/>{busy ? 'Wird veröffentlicht…' : 'Veröffentlichen'}</button></div></form>}<div className="news-feed">{news.length ? news.map(post => <article className="news-post" key={post.id}><header className="news-post-header"><div className="news-author"><div className="admin-avatar"><img src="/icons/icon-192.png" alt="KioskFalke Admin"/></div><div><b>{post.author_name}</b><span>Admin · {dateTime(post.created_at)}</span></div></div>{isAdmin && <button className="ghost icon-button delete-post" onClick={()=>deleteNews(post.id)} aria-label="News löschen"><Trash2 size={17}/></button>}</header><div className="news-copy"><h3>{post.title}</h3><p>{post.body}</p></div>{post.image_data_url && <img className="news-photo" src={post.image_data_url} alt={post.title}/>}<div className="news-actions"><button className={`news-action ${post.user_liked ? 'liked' : ''}`} onClick={()=>toggleLike(post.id)}><Heart size={19} fill={post.user_liked ? 'currentColor' : 'none'}/><span>{post.likes_count || 0}</span></button><span className="news-action static"><MessageCircle size={19}/><span>{post.comments_count || 0}</span></span></div><div className="comments"><div className="comments-list">{(post.comments || []).map(comment => <div className="comment" key={comment.id}><div className="comment-avatar">{(comment.author_name || 'U').slice(0,1).toUpperCase()}</div><div className="comment-bubble"><div className="comment-meta"><b>{comment.author_name}</b><span>{dateTime(comment.created_at)}</span></div><p>{comment.body}</p></div>{(isAdmin || comment.user_id === session.id) && <button className="ghost comment-delete" onClick={()=>deleteComment(comment.id)} aria-label="Kommentar löschen"><Trash2 size={14}/></button>}</div>)}</div><form className="comment-form" onSubmit={e=>addComment(e,post.id)}><input maxLength={500} placeholder="Kommentar schreiben …" value={commentDrafts[post.id] || ''} onChange={e=>setCommentDrafts({...commentDrafts,[post.id]:e.target.value})}/><button className="comment-send" disabled={!String(commentDrafts[post.id] || '').trim()} aria-label="Kommentar senden"><Send size={17}/></button></form></div></article>) : <Empty text="Noch keine News. Der erste Beitrag erscheint hier ganz oben."/>}</div></div>}{view === 'suggestions' && <div className="suggestions-view"><form className="card form" onSubmit={submitSuggestion}><h3>Produkt vorschlagen</h3><p className="muted">Was soll als Nächstes in den Kiosk?</p><input placeholder="Produktname, z.B. Spezi Zero" value={suggestionForm.title} onChange={e=>setSuggestionForm({...suggestionForm,title:e.target.value})}/><input placeholder="Optional: Warum soll es rein?" value={suggestionForm.description} onChange={e=>setSuggestionForm({...suggestionForm,description:e.target.value})}/><button disabled={!suggestionForm.title.trim() || busy}><MessageSquarePlus size={18}/> Vorschlag senden</button></form><h3 className="mt">Offene Vorschläge</h3><div className="stack">{open.length ? open.map(renderSuggestion) : <Empty text="Noch keine offenen Vorschläge."/>}</div>{decided.length>0 && <><h3 className="mt">Bearbeitet</h3><div className="stack">{decided.map(renderSuggestion)}</div></>}</div>}</section>
 }
 
 function Dashboard({ session }) {

@@ -132,3 +132,29 @@ Neu:
 
 ### Supabase-Migration
 Bitte in Supabase den SQL Editor öffnen und `supabase/setup_v4_paypal_liquid.sql` einmal komplett ausführen. Dadurch wird die Tabelle `kiosk_settings` sowie neue/aktualisierte RPC-Funktionen für PayPal.Me und Kontoauszüge angelegt.
+
+## Update V8: Community-News & überarbeitetes Liquid Glass
+
+Neu in dieser Version:
+
+- Kontostände bleiben auch im Darkmode eindeutig farbcodiert: offene Beträge rot, Guthaben grün.
+- Das komplette Stylesheet wurde vereinheitlicht, damit im Darkmode keine schwarzen Texte mehr auf dunklen Flächen erscheinen.
+- Der Community-Bereich besitzt jetzt zwei Ansichten: **News** und **Produktvorschläge**.
+- Admins können News mit Titel, Text und optionalem Foto veröffentlichen.
+- News werden immer mit dem neuesten Beitrag zuerst angezeigt.
+- Alle User können News liken und kommentieren.
+- User können eigene Kommentare löschen; Admins können alle Kommentare moderieren und News löschen.
+- Bei ungelesenen News erscheint am Community-Button eine rote Push-Pin. Sie verschwindet, sobald der Community-Tab geöffnet wurde.
+- News-Fotos werden vor dem Speichern im Browser automatisch verkleinert und als JPEG optimiert.
+
+### Erforderliche Supabase-Migration
+
+Nach dem Hochladen dieser Version muss im **Supabase SQL Editor** einmal die folgende Datei vollständig ausgeführt werden:
+
+```text
+supabase/setup_v6_community_news.sql
+```
+
+Die Migration ergänzt die Tabellen für News, Likes, Kommentare und den Lesestatus sowie alle benötigten RPC-Funktionen. Bestehende User, Käufe, Zahlungen, Einstellungen und Produktvorschläge bleiben erhalten.
+
+Danach das Projekt neu deployen und die PWA beziehungsweise den Browser einmal vollständig neu laden.

@@ -1,0 +1,10 @@
+KioskFalke V8 – notwendiger Supabase-Schritt
+
+1. Supabase-Projekt öffnen.
+2. SQL Editor öffnen.
+3. Den kompletten Inhalt dieser Datei ausführen:
+
+   supabase/setup_v6_community_news.sql
+
+Dadurch werden News, Likes, Kommentare und der ungelesen-Status ergänzt.
+Bestehende Käufe, Kontostände, Zahlungen, Produkte und Vorschläge bleiben erhalten.
