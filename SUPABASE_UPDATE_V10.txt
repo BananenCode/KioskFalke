@@ -1,0 +1,7 @@
+KioskFalke V10 – einmalige Datenbank-Aktualisierung
+
+1. Supabase öffnen → SQL Editor → New query.
+2. Den vollständigen Inhalt aus supabase/setup_v10_total_invoices_payments.sql einfügen.
+3. Run ausführen.
+
+Danach sind Gesamtabrechnungen, geprüfte PayPal-Gutschriften und User-Mitteilungen aktiv.

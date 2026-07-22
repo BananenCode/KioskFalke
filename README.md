@@ -1,6 +1,27 @@
-# KioskFalke PWA V9
+# KioskFalke PWA V10
 
-Kioskanwendung mit mobiler Entnahmeoberfläche und eigenem Desktop-Admin-Dashboard für User, Produkte, Verkäufe, Monatsumsätze und PDF-Rechnungen.
+Kioskanwendung mit mobiler Entnahmeoberfläche und eigenem Desktop-Admin-Dashboard für User, Produkte, Verkäufe, Monatsumsätze und PDF-Gesamtabrechnungen.
+
+## Update V10: Gesamtabrechnung und geprüfte Zahlungen
+
+- Rechnungen zeigen immer den vollständigen Nutzungszeitraum eines Users.
+- Die PDF fasst Käufe, bestätigte Zahlungen, Korrekturen und den offenen Betrag zusammen.
+- User benötigen keine Rechnungsanschrift mehr; Name und User-ID reichen aus.
+- Nach Prüfung eines PayPal-Eingangs bestätigt der Admin die Zahlung im User-Profil.
+- Der bestätigte Betrag wird als Guthaben/Ausgleich verbucht und der User erhält automatisch eine Mitteilung.
+- Kategorien können kompakt angelegt und durchsucht werden.
+- Neue Kategorien lassen sich direkt im Produktformular anlegen und sofort auswählen.
+- Produkte lassen sich filtern, schneller erfassen und als Vorlage duplizieren.
+
+### Erforderliche Supabase-Migration V10
+
+Nach V9 einmal vollständig im **Supabase SQL Editor** ausführen:
+
+```text
+supabase/setup_v10_total_invoices_payments.sql
+```
+
+Die Monatsauswahl bleibt für Dashboard, Verkäufe und Analysen erhalten. Nur die Rechnungsverwaltung arbeitet bewusst über den Gesamtzeitraum.
 
 
 ## Update V9: Desktop-Admin und Monatsrechnungen

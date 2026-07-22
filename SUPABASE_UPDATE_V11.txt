@@ -1,0 +1,18 @@
+KioskFalke V11 – einmalige Supabase-Aktualisierung
+
+1. Supabase öffnen.
+2. Im SQL Editor die Datei
+   supabase/setup_v11_invoice_requests_lock.sql
+   vollständig ausführen.
+3. Danach die App neu laden.
+
+Neu in V11:
+- Monatsauswahl im Journal unter „Mein Konto“ (Standard: aktueller Monat)
+- Admin-Forderung mit frei wählbarem Betrag und Mitteilung
+- Serverseitige Kaufsperre bei einer offenen Forderung
+- PayPal-Zahlung wird erst nach Admin-Prüfung gutgeschrieben
+- Automatische Freigabe und User-Mitteilung nach Bestätigung
+
+Wichtig:
+Nur eine ausdrücklich vom Admin gesendete Forderung sperrt den Kiosk.
+Ein normaler negativer Kontostand allein löst keine Sperre aus.
