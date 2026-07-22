@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ArrowLeft, BarChart3, Camera, CheckCircle2, CreditCard, Download, Edit3, FolderTree, Heart, ImagePlus, Link2, LogOut, MessageCircle, MessageSquarePlus, Newspaper, Package, Pin, Plus, Save, Send, ShoppingBasket, Trash2, UserRoundCog, Users, WalletCards, X, SlidersHorizontal, Moon, Sun } from 'lucide-react'
+import { ArrowLeft, BarChart3, CalendarDays, Camera, CheckCircle2, CreditCard, Download, Edit3, FileText, FolderTree, Heart, ImagePlus, LayoutDashboard, Link2, LogOut, MessageCircle, MessageSquarePlus, Newspaper, Package, Pin, Plus, RefreshCw, Save, Search, Send, ShoppingBasket, Trash2, UserRoundCog, Users, WalletCards, X, SlidersHorizontal, Moon, Sun } from 'lucide-react'
 import { supabase } from './supabase'
 import './styles.css'
 
@@ -77,16 +77,56 @@ function paypalMeLink(raw, amount) {
   const due = Math.max(0, -Number(amount || 0)).toFixed(2)
   return `https://paypal.me/${encodeURIComponent(clean)}${due > 0 ? '/' + due : ''}`
 }
-function pdfEscape(v){
+function pdfAscii(v){
   return String(v ?? '')
-    .replace(/[\()]/g, '\\$&')
+    .replace(/[\u00a0\u202f]/g,' ')
+    .replace(/€/g,'EUR')
     .replace(/[ä]/g,'ae').replace(/[Ä]/g,'Ae')
     .replace(/[ö]/g,'oe').replace(/[Ö]/g,'Oe')
     .replace(/[ü]/g,'ue').replace(/[Ü]/g,'Ue')
     .replace(/[ß]/g,'ss')
-    .replace(/\r?\n/g, ' ')
+    .replace(/[éèê]/g,'e').replace(/[ÉÈÊ]/g,'E')
+    .replace(/[áàâ]/g,'a').replace(/[ÁÀÂ]/g,'A')
+    .replace(/[–—]/g,'-').replace(/[„“”]/g,'"').replace(/[’]/g,"'")
+    .replace(/[^\x20-\x7E\n]/g,'?')
 }
+function pdfEscape(v){ return pdfAscii(v).replace(/\\/g,'\\\\').replace(/[()]/g,'\\$&').replace(/\r?\n/g,' ') }
 function monthKey(d){ return new Date(d).toLocaleString('de-DE', { month:'2-digit', year:'numeric' }) }
+function monthValue(d=new Date()){ const x=new Date(d); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}` }
+function monthLabel(value){ const [y,m]=String(value).split('-').map(Number); return new Date(y,m-1,1).toLocaleDateString('de-DE',{month:'long',year:'numeric'}) }
+function wrapPdfText(value, max=88){
+  const words=pdfAscii(value).replace(/\s+/g,' ').trim().split(' ').filter(Boolean), lines=[]
+  let line=''
+  words.forEach(word=>{ const next=line ? `${line} ${word}` : word; if(next.length>max && line){ lines.push(line); line=word } else line=next })
+  if(line || !lines.length) lines.push(line)
+  return lines
+}
+function pdfText(commands,text,x,y,size=10,bold=false){ commands.push(`BT /${bold?'F2':'F1'} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${pdfEscape(text)}) Tj ET`) }
+function pdfRule(commands,x1,y1,x2,y2,width=.5){ commands.push(`${width} w ${x1} ${y1} m ${x2} ${y2} l S`) }
+function makePdfBlob(pageStreams){
+  const pageCount=pageStreams.length, objects=[]
+  const pageNums=pageStreams.map((_,i)=>5+i*2), contentNums=pageStreams.map((_,i)=>6+i*2)
+  objects[1]='<< /Type /Catalog /Pages 2 0 R >>'
+  objects[2]=`<< /Type /Pages /Kids [${pageNums.map(n=>`${n} 0 R`).join(' ')}] /Count ${pageCount} >>`
+  objects[3]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'
+  objects[4]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'
+  pageStreams.forEach((stream,i)=>{
+    objects[pageNums[i]]=`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentNums[i]} 0 R >>`
+    objects[contentNums[i]]=`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`
+  })
+  let body='%PDF-1.4\n%KioskFalke\n', offsets=[0]
+  for(let i=1;i<objects.length;i++){ offsets[i]=body.length; body+=`${i} 0 obj\n${objects[i]}\nendobj\n` }
+  const xref=body.length
+  body+=`xref\n0 ${objects.length}\n0000000000 65535 f \n`
+  for(let i=1;i<objects.length;i++) body+=`${String(offsets[i]).padStart(10,'0')} 00000 n \n`
+  body+=`trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
+  return new Blob([body],{type:'application/pdf'})
+}
+function savePdf(blob, filename){
+  const url=URL.createObjectURL(blob), a=document.createElement('a')
+  a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(()=>URL.revokeObjectURL(url),1200)
+}
 function buildStatementLines(data) {
   const u = data.user || {}
   const lines = [
@@ -117,38 +157,77 @@ function buildStatementLines(data) {
   return lines
 }
 function downloadStatementPdf(data) {
-  const u = data.user || {}
-  const lines = buildStatementLines(data)
-  const pages = []
-  const first = lines.slice(0, 42)
-  pages.push(first)
-  for (let i=42; i<lines.length; i+=48) pages.push(lines.slice(i, i+48))
-  const objs = ['1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj']
-  const pageObjNums = []
-  let nextObj = 3
-  const fontObj = nextObj++
-  const contentObjs = []
-  pages.forEach((pageLines, idx) => {
-    const pageObj = nextObj++, contentObj = nextObj++
-    pageObjNums.push(pageObj); contentObjs.push([contentObj, pageLines])
-    objs.push(`${pageObj} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontObj} 0 R >> >> /Contents ${contentObj} 0 R >> endobj`)
+  const u=data.user || {}, raw=buildStatementLines(data), lines=raw.flatMap(line=>wrapPdfText(line,105))
+  const chunks=[]; for(let i=0;i<lines.length;i+=45) chunks.push(lines.slice(i,i+45))
+  const pages=chunks.map((page,index)=>{
+    const commands=[]; let y=800
+    pdfText(commands,index===0?'KioskFalke Kontoauszug':'KioskFalke Kontoauszug - Fortsetzung',50,y,16,true); y-=30
+    page.forEach(line=>{ pdfText(commands,line,50,y,9,false); y-=15 })
+    pdfText(commands,`Seite ${index+1} von ${chunks.length}`,485,25,8,false)
+    return commands.join('\n')
   })
-  objs.splice(1, 0, `2 0 obj << /Type /Pages /Kids [${pageObjNums.map(n=>n+' 0 R').join(' ')}] /Count ${pageObjNums.length} >> endobj`)
-  objs.push(`${fontObj} 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj`)
-  contentObjs.forEach(([num, pageLines], pageIndex) => {
-    const content = ['BT','/F1 16 Tf',`1 0 0 1 50 800 Tm`,`(${pdfEscape(pageLines[0] || '')}) Tj`,'/F1 9 Tf']
-    let y = 772
-    pageLines.slice(1).forEach(line => { content.push(`1 0 0 1 50 ${y} Tm`, `(${pdfEscape(line).slice(0,122)}) Tj`); y -= 15 })
-    content.push('/F1 8 Tf', `1 0 0 1 50 28 Tm`, `(Seite ${pageIndex+1} von ${pages.length}) Tj`, 'ET')
-    const stream = content.join('\n')
-    objs.push(`${num} 0 obj << /Length ${stream.length} >> stream\n${stream}\nendstream endobj`)
+  savePdf(makePdfBlob(pages),`Kontoauszug_${(u.user_key||'user').replace(/[^a-z0-9_-]/gi,'_')}.pdf`)
+}
+function invoiceNumber(userKey, period){ return `KF-${String(period||'').replace('-','')}-${String(userKey||'USER').toUpperCase().replace(/[^A-Z0-9_-]/g,'')}` }
+function downloadInvoicePdf(user, sales, period, settings={}){
+  const grouped=new Map()
+  sales.filter(s=>s.user_id===user.user_id).forEach(s=>{
+    const key=`${s.product_name}|${Number(s.unit_price).toFixed(2)}`
+    const row=grouped.get(key)||{product_name:s.product_name,category_title:s.category_title,quantity:0,unit_price:Number(s.unit_price),total:0}
+    row.quantity+=Number(s.quantity||0); row.total+=Number(s.total||0); grouped.set(key,row)
   })
-  let body = '%PDF-1.4\n', offsets=[0]
-  objs.forEach(o => { offsets.push(body.length); body += o + '\n' })
-  const xref = body.length
-  body += `xref\n0 ${objs.length+1}\n0000000000 65535 f \n` + offsets.slice(1).map(n=>String(n).padStart(10,'0')+' 00000 n ').join('\n') + `\ntrailer << /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
-  const blob = new Blob([body], {type:'application/pdf'})
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `Kontoauszug_${(u.user_key||'user').replace(/[^a-z0-9_-]/gi,'_')}.pdf`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000)
+  const rows=[...grouped.values()].sort((a,b)=>a.product_name.localeCompare(b.product_name,'de'))
+  const total=rows.reduce((sum,r)=>sum+r.total,0), number=invoiceNumber(user.user_key,period)
+  const capacities=[16], rest=Math.max(0,rows.length-16); for(let i=0;i<Math.ceil(rest/23);i++) capacities.push(23)
+  const chunks=[]; let cursor=0; capacities.forEach(cap=>{ chunks.push(rows.slice(cursor,cursor+cap)); cursor+=cap })
+  if(!chunks.length) chunks.push([])
+  const pages=chunks.map((chunk,pageIndex)=>{
+    const c=[], issuer=settings.invoice_issuer||'KioskFalke', periodText=monthLabel(period)
+    pdfText(c,issuer,45,800,16,true)
+    let iy=782
+    String(settings.invoice_address||'').split(/\r?\n/).filter(Boolean).slice(0,4).forEach(line=>{pdfText(c,line,45,iy,8); iy-=11})
+    if(settings.invoice_email) pdfText(c,settings.invoice_email,45,iy,8)
+    if(pageIndex===0){
+      pdfText(c,'MONATSRECHNUNG',382,800,18,true)
+      pdfText(c,`Rechnungsnummer: ${number}`,382,778,9)
+      pdfText(c,`Rechnungsdatum: ${new Date().toLocaleDateString('de-DE')}`,382,764,9)
+      pdfText(c,`Leistungszeitraum: ${periodText}`,382,750,9)
+      pdfText(c,'Rechnung an',45,700,9,true)
+      pdfText(c,user.name||'',45,684,11,true)
+      let ry=668
+      String(user.billing_address||'').split(/\r?\n/).filter(Boolean).slice(0,5).forEach(line=>{pdfText(c,line,45,ry,9); ry-=14})
+      if(user.email) pdfText(c,user.email,45,ry,9)
+    } else {
+      pdfText(c,`Monatsrechnung ${number} - Fortsetzung`,45,724,12,true)
+    }
+    const top=pageIndex===0?605:690
+    pdfRule(c,45,top+16,550,top+16,1)
+    pdfText(c,'Produkt / Kategorie',48,top+3,9,true)
+    pdfText(c,'Menge',345,top+3,9,true)
+    pdfText(c,'Einzel',410,top+3,9,true)
+    pdfText(c,'Summe',498,top+3,9,true)
+    pdfRule(c,45,top-5,550,top-5,.6)
+    let y=top-23
+    chunk.forEach(row=>{
+      const title=pdfAscii(`${row.product_name} (${row.category_title||'Ohne Kategorie'})`).slice(0,50)
+      pdfText(c,title,48,y,8.5)
+      pdfText(c,String(row.quantity),358,y,8.5)
+      pdfText(c,money(row.unit_price),410,y,8.5)
+      pdfText(c,money(row.total),498,y,8.5)
+      y-=22; pdfRule(c,45,y+7,550,y+7,.25)
+    })
+    if(pageIndex===chunks.length-1){
+      y=Math.max(y-15,115)
+      pdfText(c,'Rechnungsbetrag',390,y,11,true); pdfText(c,money(total),498,y,11,true)
+      y-=28
+      if(settings.invoice_tax_id) pdfText(c,`Steuerangabe: ${settings.invoice_tax_id}`,45,y,8)
+      wrapPdfText(settings.invoice_payment_text||'Bitte den offenen Betrag zeitnah ausgleichen.',92).slice(0,3).forEach(line=>{y-=13;pdfText(c,line,45,y,8)})
+      wrapPdfText(settings.invoice_footer||'Vielen Dank.',92).slice(0,2).forEach(line=>{y-=13;pdfText(c,line,45,y,8)})
+    }
+    pdfText(c,`Seite ${pageIndex+1} von ${chunks.length}`,485,25,8)
+    return c.join('\n')
+  })
+  savePdf(makePdfBlob(pages),`Rechnung_${number}.pdf`)
 }
 
 function ImageInput({ value, onChange }) {
@@ -219,7 +298,7 @@ function Shell({ session, setSession, tab, setTab, theme, toggleTheme }) {
     }
   }
 
-  return <div className="app"><header className="topbar"><div className="top-title"><img src="/icons/icon-192.png" alt="KioskFalke"/><div><strong>KioskFalke</strong><span>{session.name} · {session.user_key} · {isAdmin ? 'Admin' : 'User'}</span></div></div><div className="top-actions"><button className="ghost icon-button" onClick={toggleTheme} aria-label="Darkmode umschalten">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button><button className="ghost icon-button" onClick={() => setSession(null)} aria-label="Abmelden"><LogOut size={18}/></button></div></header><main className="content">{tab === 'kiosk' && <Kiosk session={session}/>} {tab === 'dashboard' && <Dashboard session={session}/>} {tab === 'community' && <Community session={session} onSeen={()=>setNewsUnread(false)}/>} {tab === 'admin' && isAdmin && <Admin session={session}/>}</main><nav className="bottom-nav">{tabs.map(([key, Icon, label]) => <button key={key} className={tab===key?'active':''} onClick={()=>openTab(key)}><span className="nav-icon"><Icon size={21}/>{key === 'community' && newsUnread && <span className="news-pin" title="Neue News"><Pin size={13} fill="currentColor"/></span>}</span><span>{label}</span></button>)}</nav></div>
+  return <div className="app"><header className="topbar"><div className="top-title"><img src="/icons/icon-192.png" alt="KioskFalke"/><div><strong>KioskFalke</strong><span>{session.name} · {session.user_key} · {isAdmin ? 'Admin' : 'User'}</span></div></div><div className="top-actions"><button className="ghost icon-button" onClick={toggleTheme} aria-label="Darkmode umschalten">{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button><button className="ghost icon-button" onClick={() => setSession(null)} aria-label="Abmelden"><LogOut size={18}/></button></div></header><main className={`content ${tab === 'admin' ? 'admin-content' : ''}`}>{tab === 'kiosk' && <Kiosk session={session}/>} {tab === 'dashboard' && <Dashboard session={session}/>} {tab === 'community' && <Community session={session} onSeen={()=>setNewsUnread(false)}/>} {tab === 'admin' && isAdmin && <Admin session={session}/>}</main><nav className="bottom-nav">{tabs.map(([key, Icon, label]) => <button key={key} className={tab===key?'active':''} onClick={()=>openTab(key)}><span className="nav-icon"><Icon size={21}/>{key === 'community' && newsUnread && <span className="news-pin" title="Neue News"><Pin size={13} fill="currentColor"/></span>}</span><span>{label}</span></button>)}</nav></div>
 }
 
 function TileImage({ src, label }) {
@@ -321,16 +400,108 @@ function Dashboard({ session }) {
   return <section><h2>Mein Konto</h2><div className="card hero"><span>Aktueller Kontostand</span><strong className={bal < 0 ? 'bad' : bal > 0 ? 'good' : ''}>{money(bal)}</strong><p>{data.pay_info}</p>{bal < 0 && payUrl && <a className="pay-link" href={payUrl} target="_blank" rel="noreferrer"><CreditCard size={19}/> Mit PayPal.Me bezahlen</a>}{bal < 0 && !payUrl && <small className="muted">PayPal.Me wurde vom Admin noch nicht hinterlegt.</small>}</div>{bal <= -50 && <div className="warning">Dein Konto ist über 50 € im Minus. Bitte zeitnah bezahlen.</div>}<div className="stats"><Stat title="Monat" value={data.month_label}/><Stat title="Entnahmen" value={money(data.month_spent)}/><Stat title="Zahlungen/Korrekturen" value={money(Number(data.month_payments||0)+Number(data.month_adjustments||0))}/></div><h3>Journal aktueller Monat</h3><div className="list">{(data.month_items || []).length ? data.month_items.map(r => <article className="card listitem" key={r.id}><div className="product-info"><IconImg src={r.icon_data_url} label={r.product_name} size="sm"/><div><b>{r.product_name}</b><span>{r.category_title || 'Ohne Kategorie'} · {r.quantity}× · {money(r.total)} · {dateTime(r.created_at)}</span></div></div></article>) : <Empty text="Keine Einträge im aktuellen Monat."/>}</div></section>
 }
 
-function Admin({ session }) { const [view, setView] = useState('overview'); const views = [['overview','Übersicht'],['settings','Einstellungen'],['categories','Kategorien'],['products','Produkte'],['users','User'],['analysis','Analyse']]; return <section><h2>Admin</h2><div className="segmented wrap">{views.map(([k,l]) => <button key={k} className={view===k?'active':''} onClick={()=>setView(k)}>{l}</button>)}</div>{view==='overview' && <AdminOverview session={session}/>} {view==='settings' && <AdminSettings session={session}/>} {view==='categories' && <AdminCategories session={session}/>} {view==='products' && <AdminProducts session={session}/>} {view==='users' && <AdminUsers session={session}/>} {view==='analysis' && <AdminAnalysis session={session}/>}</section> }
-
-function AdminSettings({ session }) {
-  const [paypal,setPaypal]=useState(''), [msg,setMsg]=useState('')
-  useEffect(()=>{ rpc('kiosk_admin_get_settings', actor(session)).then(d=>setPaypal(d.paypal_me || '')).catch(e=>setMsg(e.message)) }, [])
-  async function save(e){ e.preventDefault(); setMsg(''); try{ await rpc('kiosk_admin_set_paypal_me',{...actor(session),p_paypal_me:paypal}); setMsg('PayPal.Me-Adresse gespeichert.') }catch(e){ setMsg(e.message) } }
-  return <div className="stack"><form className="card form" onSubmit={save}><h3>PayPal.Me für alle User</h3><p className="muted">Hinterlege nur deinen PayPal.Me-Namen oder die komplette paypal.me-Adresse. Im Konto-Tab wird automatisch der offene Betrag angehängt.</p><input placeholder="z.B. kioskfalke oder https://paypal.me/kioskfalke" value={paypal} onChange={e=>setPaypal(e.target.value)} autoCapitalize="none"/><button><Save size={18}/> Speichern</button>{msg&&<div className={msg.includes('gespeichert')?'notice':'error'}>{msg}</div>}</form></div>
+function Admin({ session }) {
+  const [view,setView]=useState('overview'), [month,setMonth]=useState(monthValue()), [commerce,setCommerce]=useState(null), [commerceError,setCommerceError]=useState(''), [commerceBusy,setCommerceBusy]=useState(false)
+  const views=[
+    ['overview',LayoutDashboard,'Dashboard'],
+    ['sales',ShoppingBasket,'Verkäufe'],
+    ['invoices',FileText,'Rechnungen'],
+    ['users',Users,'User'],
+    ['products',Package,'Produkte'],
+    ['categories',FolderTree,'Kategorien'],
+    ['analysis',BarChart3,'Analyse'],
+    ['settings',SlidersHorizontal,'Einstellungen']
+  ]
+  async function loadCommerce(){
+    setCommerceBusy(true); setCommerceError('')
+    try{ setCommerce(await rpc('kiosk_admin_desktop_dashboard',{...actor(session),p_month:`${month}-01`})) }
+    catch(e){ setCommerceError(e.message.includes('kiosk_admin_desktop_dashboard') ? 'Die Desktop-Admin-Migration V9 muss zuerst in Supabase ausgeführt werden.' : e.message) }
+    finally{ setCommerceBusy(false) }
+  }
+  useEffect(()=>{ if(['overview','sales','invoices'].includes(view)) loadCommerce() },[month,view])
+  return <section className="admin-workspace">
+    <aside className="admin-sidebar">
+      <div className="admin-sidebar-brand"><span>Administration</span><strong>KioskFalke</strong></div>
+      <nav>{views.map(([key,Icon,label])=><button key={key} className={view===key?'active':''} onClick={()=>setView(key)}><Icon size={18}/><span>{label}</span></button>)}</nav>
+    </aside>
+    <div className="admin-main">
+      <div className="admin-mobile-nav segmented wrap">{views.map(([key,Icon,label])=><button key={key} className={view===key?'active':''} onClick={()=>setView(key)}><Icon size={17}/>{label}</button>)}</div>
+      {['overview','sales','invoices'].includes(view) && <AdminMonthToolbar month={month} setMonth={setMonth} busy={commerceBusy} onRefresh={loadCommerce}/>} 
+      {commerceError && ['overview','sales','invoices'].includes(view) && <div className="error">{commerceError}</div>}
+      {view==='overview' && <AdminDashboardView data={commerce} busy={commerceBusy} onNavigate={setView}/>} 
+      {view==='sales' && <AdminSales data={commerce} busy={commerceBusy}/>} 
+      {view==='invoices' && <AdminInvoices data={commerce} busy={commerceBusy} month={month}/>} 
+      {view==='settings' && <AdminSettings session={session}/>} 
+      {view==='categories' && <AdminCategories session={session}/>} 
+      {view==='products' && <AdminProducts session={session}/>} 
+      {view==='users' && <AdminUsers session={session}/>} 
+      {view==='analysis' && <AdminAnalysis session={session}/>} 
+    </div>
+  </section>
 }
 
-function AdminOverview({ session }) { const [rows,setRows]=useState([]), [msg,setMsg]=useState(''); const load=async()=>setRows(await rpc('kiosk_admin_overview',actor(session))); useEffect(()=>{load().catch(e=>setMsg(e.message))},[]); return <div className="stack">{msg&&<div className="error">{msg}</div>}{rows.map(r=><article className="card row" key={r.user_id}><div><h3>{r.name}</h3><p>{r.user_key} · {r.role}</p><b className={Number(r.balance)<0?'bad':Number(r.balance)>0?'good':''}>{money(r.balance)}</b></div><p>Dieser Monat: {money(r.month_spent)} · {r.entries_count} Buchungen</p></article>)}</div> }
+function AdminMonthToolbar({month,setMonth,busy,onRefresh}){
+  return <div className="admin-page-head"><div><span className="eyebrow">Desktop-Verwaltung</span><h2>{monthLabel(month)}</h2></div><div className="admin-toolbar"><label className="month-picker"><CalendarDays size={17}/><input type="month" value={month} onChange={e=>setMonth(e.target.value || monthValue())} aria-label="Abrechnungsmonat"/></label><button className="secondary icon-button" onClick={onRefresh} disabled={busy} aria-label="Daten aktualisieren"><RefreshCw size={18}/></button></div></div>
+}
+
+function AdminDashboardView({data,busy,onNavigate}){
+  if(!data && busy) return <Empty text="Lade Desktop-Dashboard…"/>
+  if(!data) return null
+  const s=data.summary||{}, debtors=[...(data.invoices||[])].filter(u=>Number(u.balance)<0).sort((a,b)=>Number(a.balance)-Number(b.balance)).slice(0,6)
+  return <div className="admin-dashboard stack">
+    <div className="admin-kpis">
+      <Stat title="Monatsumsatz" value={money(s.revenue)}/>
+      <Stat title="Verkäufe" value={s.sales_count||0}/>
+      <Stat title="Verkaufte Einheiten" value={s.units||0}/>
+      <Stat title="Offene User-Salden" value={money(s.open_balance)} tone={Number(s.open_balance)>0?'bad':''}/>
+    </div>
+    <div className="dashboard-grid">
+      <section className="card dashboard-panel"><div className="panel-heading"><div><h3>Top-Produkte</h3><p>Nach Umsatz im ausgewählten Monat</p></div><button className="ghost smallbtn" onClick={()=>onNavigate('sales')}>Alle Verkäufe</button></div><div className="rank-list">{(data.top_products||[]).length ? data.top_products.map((p,index)=><div className="rank-row" key={p.id}><span className="rank-number">{index+1}</span><div><b>{p.name}</b><small>{p.category_title} · {p.units} Stück</small></div><strong>{money(p.revenue)}</strong></div>) : <Empty text="Keine Verkäufe in diesem Monat."/>}</div></section>
+      <section className="card dashboard-panel"><div className="panel-heading"><div><h3>Offene Konten</h3><p>{s.debtors||0} User mit negativem Saldo</p></div><button className="ghost smallbtn" onClick={()=>onNavigate('users')}>User verwalten</button></div><div className="rank-list">{debtors.length ? debtors.map(u=><div className="rank-row" key={u.user_id}><div className="user-avatar">{(u.name||'U').slice(0,1).toUpperCase()}</div><div><b>{u.name}</b><small>{u.user_key} · Monatskäufe {money(u.month_total)}</small></div><strong className="bad">{money(u.balance)}</strong></div>) : <Empty text="Keine offenen Konten."/>}</div></section>
+    </div>
+    <section className="card dashboard-panel"><div className="panel-heading"><div><h3>Letzte Verkäufe</h3><p>Die neuesten Buchungen des Monats</p></div><button className="ghost smallbtn" onClick={()=>onNavigate('invoices')}>Rechnungslauf</button></div><SalesTable rows={(data.sales||[]).slice(0,8)} compact/></section>
+  </div>
+}
+
+function SalesTable({rows,compact=false}){
+  if(!rows.length) return <Empty text="Keine Verkäufe gefunden."/>
+  return <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Zeitpunkt</th><th>User</th><th>Produkt</th><th>Kategorie</th><th className="num">Menge</th><th className="num">Betrag</th></tr></thead><tbody>{rows.map(row=><tr key={row.id}><td>{compact ? new Date(row.created_at).toLocaleDateString('de-DE') : dateTime(row.created_at)}</td><td><b>{row.user_name}</b><small>{row.user_key}</small></td><td>{row.product_name}</td><td>{row.category_title}</td><td className="num">{row.quantity}</td><td className="num"><strong>{money(row.total)}</strong>{row.excluded_from_revenue&&<small>nicht im Umsatz</small>}</td></tr>)}</tbody></table></div>
+}
+
+function AdminSales({data,busy}){
+  const [query,setQuery]=useState(''), [user,setUser]=useState('all')
+  if(!data && busy) return <Empty text="Lade Verkäufe…"/>
+  if(!data) return null
+  const users=[...new Map((data.sales||[]).map(s=>[s.user_id,{id:s.user_id,name:s.user_name}])).values()].sort((a,b)=>a.name.localeCompare(b.name,'de'))
+  const needle=query.trim().toLowerCase()
+  const rows=(data.sales||[]).filter(s=>(user==='all'||s.user_id===user)&&(!needle||`${s.user_name} ${s.user_key} ${s.product_name} ${s.category_title}`.toLowerCase().includes(needle)))
+  const total=rows.reduce((sum,r)=>sum+Number(r.total||0),0), units=rows.reduce((sum,r)=>sum+Number(r.quantity||0),0)
+  return <div className="stack"><div className="card filter-bar"><label className="search-field"><Search size={18}/><input placeholder="User, Produkt oder Kategorie suchen" value={query} onChange={e=>setQuery(e.target.value)}/></label><select value={user} onChange={e=>setUser(e.target.value)}><option value="all">Alle User</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></div><div className="admin-kpis compact-kpis"><Stat title="Gefundene Verkäufe" value={rows.length}/><Stat title="Einheiten" value={units}/><Stat title="Summe" value={money(total)}/></div><section className="card dashboard-panel"><SalesTable rows={rows}/></section></div>
+}
+
+function AdminInvoices({data,busy,month}){
+  const [query,setQuery]=useState(''), [onlySales,setOnlySales]=useState(true)
+  if(!data && busy) return <Empty text="Lade Rechnungen…"/>
+  if(!data) return null
+  const needle=query.trim().toLowerCase(), settings=data.settings||{}
+  const rows=(data.invoices||[]).filter(u=>(!onlySales||Number(u.month_total)>0)&&(!needle||`${u.name} ${u.user_key} ${u.email}`.toLowerCase().includes(needle)))
+  const invoiceTotal=rows.reduce((sum,u)=>sum+Number(u.month_total||0),0)
+  const settingsReady=Boolean(settings.invoice_issuer && settings.invoice_address)
+  return <div className="stack">
+    {!settingsReady&&<div className="warning">Für vollständige Rechnungen bitte unter Einstellungen Absender und Anschrift hinterlegen.</div>}
+    <div className="card filter-bar"><label className="search-field"><Search size={18}/><input placeholder="User oder User_ID suchen" value={query} onChange={e=>setQuery(e.target.value)}/></label><div className="invoice-run-summary"><label className="check"><input type="checkbox" checked={onlySales} onChange={e=>setOnlySales(e.target.checked)}/> Nur mit Käufen</label><span>{rows.filter(u=>Number(u.month_total)>0).length} Rechnungen</span><strong>{money(invoiceTotal)}</strong></div></div>
+    <section className="card dashboard-panel"><div className="data-table-wrap"><table className="data-table invoice-table"><thead><tr><th>Rechnung</th><th>User</th><th>Abrechnungsdaten</th><th className="num">Käufe</th><th className="num">Monatssumme</th><th className="num">Kontostand</th><th></th></tr></thead><tbody>{rows.map(u=>{const hasSales=Number(u.month_total)>0, ready=Boolean(u.billing_address); return <tr key={u.user_id}><td><b>{invoiceNumber(u.user_key,month)}</b><small>{monthLabel(month)}</small></td><td><b>{u.name}</b><small>{u.user_key}</small></td><td><span className={`status-pill ${ready?'ready':'missing'}`}>{ready?'Bereit':'Adresse fehlt'}</span>{u.email&&<small>{u.email}</small>}</td><td className="num">{u.sales_count} / {u.units} Stk.</td><td className="num"><strong>{money(u.month_total)}</strong></td><td className={`num ${Number(u.balance)<0?'bad':Number(u.balance)>0?'good':''}`}>{money(u.balance)}</td><td className="num"><button className="secondary smallbtn" disabled={!hasSales} onClick={()=>downloadInvoicePdf(u,data.sales||[],month,settings)}><Download size={16}/> PDF</button></td></tr>})}</tbody></table></div></section>
+  </div>
+}
+
+function AdminSettings({ session }) {
+  const emptyInvoice={invoice_issuer:'KioskFalke',invoice_address:'',invoice_email:'',invoice_tax_id:'',invoice_payment_text:'Bitte den offenen Betrag zeitnah ausgleichen.',invoice_footer:'Vielen Dank.'}
+  const [paypal,setPaypal]=useState(''), [invoice,setInvoice]=useState(emptyInvoice), [msg,setMsg]=useState(''), [busy,setBusy]=useState(false)
+  useEffect(()=>{ rpc('kiosk_admin_get_settings', actor(session)).then(d=>{setPaypal(d.paypal_me||'');setInvoice({...emptyInvoice,...d})}).catch(e=>setMsg(e.message)) }, [])
+  async function savePaypal(e){ e.preventDefault(); setMsg(''); setBusy(true); try{ await rpc('kiosk_admin_set_paypal_me',{...actor(session),p_paypal_me:paypal}); setMsg('PayPal.Me-Adresse gespeichert.') }catch(e){ setMsg(e.message) }finally{setBusy(false)} }
+  async function saveInvoice(e){ e.preventDefault(); setMsg(''); setBusy(true); try{ const d=await rpc('kiosk_admin_set_invoice_settings',{...actor(session),p_invoice_issuer:invoice.invoice_issuer,p_invoice_address:invoice.invoice_address,p_invoice_email:invoice.invoice_email,p_invoice_tax_id:invoice.invoice_tax_id,p_invoice_payment_text:invoice.invoice_payment_text,p_invoice_footer:invoice.invoice_footer}); setInvoice({...emptyInvoice,...d}); setMsg('Rechnungseinstellungen gespeichert.') }catch(e){ setMsg(e.message) }finally{setBusy(false)} }
+  return <div className="settings-grid"><form className="card form" onSubmit={saveInvoice}><div><span className="eyebrow">PDF-Rechnungen</span><h2>Rechnungsabsender</h2></div><label><span>Absender / Organisation</span><input value={invoice.invoice_issuer} onChange={e=>setInvoice({...invoice,invoice_issuer:e.target.value})}/></label><label><span>Anschrift</span><textarea rows={4} placeholder={'Straße 1\n12345 Ort'} value={invoice.invoice_address} onChange={e=>setInvoice({...invoice,invoice_address:e.target.value})}/></label><div className="form-columns"><label><span>E-Mail</span><input type="email" value={invoice.invoice_email} onChange={e=>setInvoice({...invoice,invoice_email:e.target.value})}/></label><label><span>Steuerangabe optional</span><input placeholder="z. B. USt-IdNr." value={invoice.invoice_tax_id} onChange={e=>setInvoice({...invoice,invoice_tax_id:e.target.value})}/></label></div><label><span>Zahlungshinweis</span><textarea rows={3} value={invoice.invoice_payment_text} onChange={e=>setInvoice({...invoice,invoice_payment_text:e.target.value})}/></label><label><span>Fußzeile</span><input value={invoice.invoice_footer} onChange={e=>setInvoice({...invoice,invoice_footer:e.target.value})}/></label><button disabled={busy}><Save size={18}/> Rechnungseinstellungen speichern</button></form><form className="card form" onSubmit={savePaypal}><div><span className="eyebrow">Zahlungen</span><h2>PayPal.Me</h2></div><p className="muted">Der offene Betrag wird im Konto des Users automatisch an den PayPal.Me-Link angehängt.</p><input placeholder="z.B. kioskfalke oder https://paypal.me/kioskfalke" value={paypal} onChange={e=>setPaypal(e.target.value)} autoCapitalize="none"/><button disabled={busy}><Save size={18}/> PayPal.Me speichern</button>{msg&&<div className={msg.includes('gespeichert')?'notice':'error'}>{msg}</div>}</form></div>
+}
 
 function AdminCategories({ session }) {
   const [rows,setRows]=useState([]), [form,setForm]=useState({ title:'', icon_data_url:'', active:true }), [edit,setEdit]=useState(null), [msg,setMsg]=useState('')
@@ -341,21 +512,25 @@ function AdminCategories({ session }) {
   return <div className="stack"><form className="card form" onSubmit={save}><h3>{edit?'Kategorie bearbeiten':'Kategorie anlegen'}</h3><input placeholder="Titel, z.B. Softgetränke" value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/><ImageInput value={form.icon_data_url} onChange={v=>setForm({...form,icon_data_url:v})}/><label className="check"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Aktiv</label><div className="actions"><button><FolderTree size={18}/> Speichern</button>{edit&&<button type="button" className="secondary" onClick={()=>{setEdit(null);setForm({title:'',icon_data_url:'',active:true})}}>Abbrechen</button>}</div></form>{msg&&<div className="error">{msg}</div>}{rows.map(c=><article className="card row" key={c.id}><div className="product-info"><IconImg src={c.icon_data_url} label={c.title}/><div><h3>{c.title}</h3><p>{c.active?'aktiv':'inaktiv'}</p></div></div><div className="actions"><button className="secondary" onClick={()=>startEdit(c)}><Edit3 size={16}/> Edit</button><button className="danger" onClick={()=>del(c)}><Trash2 size={16}/> Löschen</button></div></article>)}</div>
 }
 function AdminProducts({ session }) {
-  const empty={name:'',description:'',price:'',category_id:'',active:true,icon_data_url:'',excluded_from_revenue:false}; const [rows,setRows]=useState([]), [cats,setCats]=useState([]), [form,setForm]=useState(empty), [edit,setEdit]=useState(null), [msg,setMsg]=useState('')
+  const empty={name:'',description:'',price:'',category_id:'',active:true,icon_data_url:'',excluded_from_revenue:false}
+  const [rows,setRows]=useState([]), [cats,setCats]=useState([]), [form,setForm]=useState(empty), [edit,setEdit]=useState(null), [msg,setMsg]=useState(''), [query,setQuery]=useState('')
   const load=async()=>{ setRows(await rpc('kiosk_admin_products',actor(session))); setCats(await rpc('kiosk_admin_categories',actor(session))) }; useEffect(()=>{load().catch(e=>setMsg(e.message))},[])
-  function startEdit(p){ setEdit(p.id); setForm({name:p.name,description:p.description||'',price:p.price,category_id:p.category_id||'',active:p.active,icon_data_url:p.icon_data_url||'',excluded_from_revenue:!!p.excluded_from_revenue}) }
-  async function save(e){ e.preventDefault(); await rpc('kiosk_admin_upsert_product',{...actor(session),p_product_id:edit,p_name:form.name,p_description:form.description,p_price:Number(form.price),p_category_id:form.category_id||null,p_active:form.active,p_icon_data_url:form.icon_data_url,p_excluded_from_revenue:form.excluded_from_revenue}); setForm(empty); setEdit(null); await load() }
-  async function del(p){ if(confirm(`Produkt "${p.name}" löschen/deaktivieren?`)){ await rpc('kiosk_admin_delete_product',{...actor(session),p_product_id:p.id}); await load()} }
-  return <div className="stack"><form className="card form" onSubmit={save}><h3>{edit?'Produkt bearbeiten':'Produkt anlegen'}</h3><input placeholder="Titel, z.B. Cola" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><input placeholder="Beschreibung, z.B. Cola, Sprite, Fanta" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/><input placeholder="Preis z.B. 1.00" type="number" step="0.01" value={form.price} onChange={e=>setForm({...form,price:e.target.value})}/><select value={form.category_id} onChange={e=>setForm({...form,category_id:e.target.value})}><option value="">Kategorie wählen</option>{cats.filter(c=>c.active).map(c=><option key={c.id} value={c.id}>{c.title}</option>)}</select><ImageInput value={form.icon_data_url} onChange={v=>setForm({...form,icon_data_url:v})}/><label className="check"><input type="checkbox" checked={form.excluded_from_revenue} onChange={e=>setForm({...form,excluded_from_revenue:e.target.checked})}/> Nicht dem Gesamtumsatz zurechnen</label><label className="check"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Aktiv</label><div className="actions"><button><Package size={18}/> Speichern</button>{edit&&<button type="button" className="secondary" onClick={()=>{setEdit(null);setForm(empty)}}>Abbrechen</button>}</div></form>{msg&&<div className="error">{msg}</div>}{rows.map(p=><article className="card row" key={p.id}><div className="product-info"><IconImg src={p.icon_data_url} label={p.name}/><div><h3>{p.name}</h3><p>{p.description} · {p.category_title} · {money(p.price)} · {p.active?'aktiv':'inaktiv'}</p>{p.excluded_from_revenue&&<small className="pill">nicht im Umsatz</small>}</div></div><div className="actions"><button className="secondary" onClick={()=>startEdit(p)}><Edit3 size={16}/> Edit</button><button className="danger" onClick={()=>del(p)}><Trash2 size={16}/> Löschen</button></div></article>)}</div>
+  function startEdit(p){ setEdit(p.id); setForm({name:p.name,description:p.description||'',price:p.price,category_id:p.category_id||'',active:p.active,icon_data_url:p.icon_data_url||'',excluded_from_revenue:!!p.excluded_from_revenue}); window.scrollTo({top:0,behavior:'smooth'}) }
+  async function save(e){ e.preventDefault(); setMsg(''); try{ await rpc('kiosk_admin_upsert_product',{...actor(session),p_product_id:edit,p_name:form.name,p_description:form.description,p_price:Number(form.price),p_category_id:form.category_id||null,p_active:form.active,p_icon_data_url:form.icon_data_url,p_excluded_from_revenue:form.excluded_from_revenue}); setForm(empty); setEdit(null); await load(); setMsg('Produkt gespeichert.') }catch(error){setMsg(error.message)} }
+  async function del(p){ if(confirm(`Produkt "${p.name}" löschen/deaktivieren?`)){ try{await rpc('kiosk_admin_delete_product',{...actor(session),p_product_id:p.id}); await load()}catch(error){setMsg(error.message)} } }
+  const needle=query.trim().toLowerCase(), shown=rows.filter(p=>!needle||`${p.name} ${p.description} ${p.category_title}`.toLowerCase().includes(needle))
+  return <div className="stack"><form className="card form admin-editor" onSubmit={save}><div className="panel-heading"><div><span className="eyebrow">Sortiment</span><h2>{edit?'Produkt bearbeiten':'Produkt anlegen'}</h2></div>{edit&&<button type="button" className="secondary smallbtn" onClick={()=>{setEdit(null);setForm(empty)}}>Abbrechen</button>}</div><div className="form-columns"><label><span>Produktname</span><input placeholder="z. B. Cola" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label><span>Preis</span><input placeholder="1,00" type="number" min="0" step="0.01" value={form.price} onChange={e=>setForm({...form,price:e.target.value})}/></label><label><span>Kategorie</span><select value={form.category_id} onChange={e=>setForm({...form,category_id:e.target.value})}><option value="">Kategorie wählen</option>{cats.filter(c=>c.active).map(c=><option key={c.id} value={c.id}>{c.title}</option>)}</select></label><div className="editor-options"><label className="check"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Aktiv</label><label className="check"><input type="checkbox" checked={form.excluded_from_revenue} onChange={e=>setForm({...form,excluded_from_revenue:e.target.checked})}/> Nicht im Umsatz</label></div></div><label><span>Beschreibung</span><input placeholder="Optional" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><ImageInput value={form.icon_data_url} onChange={v=>setForm({...form,icon_data_url:v})}/><button><Package size={18}/> {edit?'Änderungen speichern':'Produkt anlegen'}</button>{msg&&<div className={msg.includes('gespeichert')?'notice':'error'}>{msg}</div>}</form><div className="card filter-bar"><label className="search-field"><Search size={18}/><input placeholder="Produkt oder Kategorie suchen" value={query} onChange={e=>setQuery(e.target.value)}/></label><span className="muted">{shown.length} von {rows.length} Produkten</span></div><section className="card dashboard-panel"><div className="data-table-wrap"><table className="data-table"><thead><tr><th>Produkt</th><th>Kategorie</th><th className="num">Preis</th><th>Status</th><th>Umsatz</th><th></th></tr></thead><tbody>{shown.map(p=><tr key={p.id}><td><div className="table-product"><IconImg src={p.icon_data_url} label={p.name} size="sm"/><div><b>{p.name}</b><small>{p.description||'Keine Beschreibung'}</small></div></div></td><td>{p.category_title||'Ohne Kategorie'}</td><td className="num"><strong>{money(p.price)}</strong></td><td><span className={`status-pill ${p.active?'ready':'missing'}`}>{p.active?'Aktiv':'Inaktiv'}</span></td><td>{p.excluded_from_revenue?<span className="status-pill missing">Ausgeschlossen</span>:<span className="status-pill ready">Enthalten</span>}</td><td><div className="table-actions"><button className="secondary smallbtn" onClick={()=>startEdit(p)}><Edit3 size={15}/> Edit</button><button className="danger smallbtn" onClick={()=>del(p)}><Trash2 size={15}/></button></div></td></tr>)}</tbody></table></div></section></div>
 }
 
 function AdminUsers({ session }) {
-  const empty={user_key:'',name:'',role:'user',code:'',active:true}; const [rows,setRows]=useState([]), [form,setForm]=useState(empty), [edit,setEdit]=useState(null), [selected,setSelected]=useState(null), [msg,setMsg]=useState('')
+  const empty={user_key:'',name:'',role:'user',code:'',active:true,email:'',billing_address:''}
+  const [rows,setRows]=useState([]), [form,setForm]=useState(empty), [edit,setEdit]=useState(null), [selected,setSelected]=useState(null), [msg,setMsg]=useState(''), [query,setQuery]=useState('')
   const load=async()=>setRows(await rpc('kiosk_admin_users',actor(session))); useEffect(()=>{load().catch(e=>setMsg(e.message))},[])
-  function startEdit(u){ setEdit(u.id); setForm({user_key:u.user_key,name:u.name,role:u.role,code:'',active:u.active}) }
-  async function save(e){ e.preventDefault(); setMsg(''); await rpc('kiosk_admin_upsert_user',{...actor(session),p_user_id:edit,p_user_key:form.user_key,p_name:form.name,p_role:form.role,p_code:form.code,p_active:form.active}); setForm(empty); setEdit(null); await load() }
+  function startEdit(u){ setEdit(u.id); setForm({user_key:u.user_key,name:u.name,role:u.role,code:'',active:u.active,email:u.email||'',billing_address:u.billing_address||''}); window.scrollTo({top:0,behavior:'smooth'}) }
+  async function save(e){ e.preventDefault(); setMsg(''); try{ await rpc('kiosk_admin_upsert_user',{...actor(session),p_user_id:edit,p_user_key:form.user_key,p_name:form.name,p_role:form.role,p_code:form.code,p_active:form.active,p_email:form.email,p_billing_address:form.billing_address}); setForm(empty); setEdit(null); await load(); setMsg('User gespeichert.') }catch(error){setMsg(error.message)} }
   async function del(u){ const code = u.role==='admin' ? prompt('Admin löschen: Sicherheitscode eingeben') : ''; if(u.role==='admin' && code===null) return; if(confirm(`${u.name} löschen/deaktivieren? Nur bei Kontostand 0 möglich.`)){ try{ await rpc('kiosk_admin_delete_user',{...actor(session),p_user_id:u.id,p_drop_code:code||''}); await load() }catch(e){alert(e.message)} } }
-  return <div className="stack"><form className="card form" onSubmit={save}><h3>{edit?'User bearbeiten':'User anlegen'}</h3><input placeholder="User_ID, z.B. max01" value={form.user_key} onChange={e=>setForm({...form,user_key:e.target.value})}/><input placeholder="Name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}><option value="user">User</option><option value="admin">Admin</option></select><input placeholder={edit?'Neuer Zugangscode optional':'Zugangscode'} value={form.code} onChange={e=>setForm({...form,code:e.target.value})}/><label className="check"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Aktiv</label><div className="actions"><button><Users size={18}/> Speichern</button>{edit&&<button type="button" className="secondary" onClick={()=>{setEdit(null);setForm(empty)}}>Abbrechen</button>}</div></form>{msg&&<div className="error">{msg}</div>}{rows.map(u=><article className="card row" key={u.id}><div><h3>{u.name}</h3><p>{u.user_key} · {u.role} · {u.active?'aktiv':'inaktiv'}</p><b className={Number(u.balance)<0?'bad':Number(u.balance)>0?'good':''}>{money(u.balance)}</b></div><div className="actions"><button className="secondary" onClick={()=>setSelected(u.id)}><SlidersHorizontal size={16}/> Profil</button><button className="secondary" onClick={()=>startEdit(u)}><Edit3 size={16}/> Edit</button><button className="danger" onClick={()=>del(u)}><Trash2 size={16}/> Löschen</button></div></article>)}{selected&&<UserProfile session={session} userId={selected} onClose={()=>{setSelected(null);load()}}/>}</div>
+  const needle=query.trim().toLowerCase(), shown=rows.filter(u=>!needle||`${u.name} ${u.user_key} ${u.email}`.toLowerCase().includes(needle))
+  return <div className="stack"><form className="card form admin-editor" onSubmit={save}><div className="panel-heading"><div><span className="eyebrow">Benutzerverwaltung</span><h2>{edit?'User bearbeiten':'User anlegen'}</h2></div>{edit&&<button type="button" className="secondary smallbtn" onClick={()=>{setEdit(null);setForm(empty)}}>Abbrechen</button>}</div><div className="form-columns"><label><span>User_ID</span><input placeholder="z. B. max01" value={form.user_key} onChange={e=>setForm({...form,user_key:e.target.value})}/></label><label><span>Name</span><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label><span>Rolle</span><select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}><option value="user">User</option><option value="admin">Admin</option></select></label><label><span>{edit?'Neuer Zugangscode optional':'Zugangscode'}</span><input type="password" value={form.code} onChange={e=>setForm({...form,code:e.target.value})}/></label><label><span>E-Mail für Rechnung</span><input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label className="check editor-check"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> User ist aktiv</label></div><label><span>Rechnungsanschrift</span><textarea rows={3} placeholder={'Straße 1\n12345 Ort'} value={form.billing_address} onChange={e=>setForm({...form,billing_address:e.target.value})}/></label><button><Users size={18}/> {edit?'Änderungen speichern':'User anlegen'}</button>{msg&&<div className={msg.includes('gespeichert')?'notice':'error'}>{msg}</div>}</form><div className="card filter-bar"><label className="search-field"><Search size={18}/><input placeholder="User suchen" value={query} onChange={e=>setQuery(e.target.value)}/></label><span className="muted">{shown.length} von {rows.length} Usern</span></div><section className="card dashboard-panel"><div className="data-table-wrap"><table className="data-table"><thead><tr><th>User</th><th>Rolle</th><th>Rechnungsdaten</th><th>Status</th><th className="num">Kontostand</th><th></th></tr></thead><tbody>{shown.map(u=><tr key={u.id}><td><b>{u.name}</b><small>{u.user_key}</small></td><td>{u.role==='admin'?'Admin':'User'}</td><td><span className={`status-pill ${u.billing_address?'ready':'missing'}`}>{u.billing_address?'Adresse vorhanden':'Adresse fehlt'}</span>{u.email&&<small>{u.email}</small>}</td><td><span className={`status-pill ${u.active?'ready':'missing'}`}>{u.active?'Aktiv':'Inaktiv'}</span></td><td className={`num ${Number(u.balance)<0?'bad':Number(u.balance)>0?'good':''}`}><strong>{money(u.balance)}</strong></td><td><div className="table-actions"><button className="secondary smallbtn" onClick={()=>setSelected(u.id)}><SlidersHorizontal size={15}/> Profil</button><button className="secondary smallbtn" onClick={()=>startEdit(u)}><Edit3 size={15}/> Edit</button><button className="danger smallbtn" onClick={()=>del(u)}><Trash2 size={15}/></button></div></td></tr>)}</tbody></table></div></section>{selected&&<UserProfile session={session} userId={selected} onClose={()=>{setSelected(null);load()}}/>}</div>
 }
 function UserProfile({ session, userId, onClose }) {
   const [data,setData]=useState(null), [pay,setPay]=useState({amount:'',note:''}), [adj,setAdj]=useState({amount:'',note:''}), [msg,setMsg]=useState('')

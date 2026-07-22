@@ -1,6 +1,34 @@
-# KioskFalke PWA V3
+# KioskFalke PWA V9
 
-Smartphone-optimierte Kiosk-Verwaltung mit modernem iOS/Apple-Design, Kategorien zuerst, Produkt-Icons, Kategorie-Icons, User_ID-Login, Kontostand, Monatsjournal, Konto-Korrekturen und Admin-Analyse.
+Kioskanwendung mit mobiler Entnahmeoberfläche und eigenem Desktop-Admin-Dashboard für User, Produkte, Verkäufe, Monatsumsätze und PDF-Rechnungen.
+
+
+## Update V9: Desktop-Admin und Monatsrechnungen
+
+Neu in dieser Version:
+
+- eigener Desktop-Arbeitsbereich mit seitlicher Admin-Navigation
+- Monatsfilter für Dashboard, Verkäufe und Rechnungen
+- Kennzahlen für Umsatz, Verkäufe, Einheiten und offene User-Salden
+- filterbare Verkaufstabelle nach User, Produkt und Kategorie
+- monatliche Rechnungsliste für alle User
+- PDF-Monatsrechnung pro User mit Produktpositionen, Mengen und Preisen
+- konfigurierbare Rechnungsabsender-, Adress-, Steuer- und Zahlungshinweise
+- E-Mail und Rechnungsanschrift je User
+- Schutz davor, den letzten aktiven Admin über die Bearbeitung zu deaktivieren oder herabzustufen
+- reparierter PDF-Aufbau für Kontoauszüge und Rechnungen
+
+### Erforderliche Supabase-Migration V9
+
+Nach dem bisherigen Datenbank-Setup im **Supabase SQL Editor** einmal vollständig ausführen:
+
+```text
+supabase/setup_v9_desktop_admin_invoices.sql
+```
+
+Danach die App neu deployen und vollständig neu laden. Unter **Admin > Einstellungen** zuerst den Rechnungsabsender hinterlegen und anschließend unter **Admin > User** die Rechnungsanschriften ergänzen.
+
+Die erzeugte PDF ist eine technische Monatsrechnung. Ob sie alle steuer- und handelsrechtlichen Pflichtangaben deines konkreten Einsatzfalls erfüllt, hängt von den eingetragenen Absenderdaten und den für dich geltenden Vorgaben ab.
 
 ## Neu in V3
 

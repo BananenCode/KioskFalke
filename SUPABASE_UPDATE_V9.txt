@@ -1,0 +1,10 @@
+KioskFalke V9 – notwendiges Supabase-Update
+
+1. Supabase öffnen.
+2. SQL Editor öffnen.
+3. Datei supabase/setup_v9_desktop_admin_invoices.sql vollständig ausführen.
+4. App neu deployen und Browser/PWA vollständig neu laden.
+5. Admin > Einstellungen: Rechnungsabsender und Anschrift pflegen.
+6. Admin > User: Rechnungsanschriften der User ergänzen.
+
+Die Migration erhält bestehende User, Käufe, Zahlungen, Produkte und Community-Daten.
